@@ -7,7 +7,7 @@ BUILDINFOSDET ?=
 DOCKER_REPO        := synfinatic/
 NETFLOW2NG_NAME    := netflow2ng
 NETFLOW2NG_VERSION := $(shell git describe --tags 2>/dev/null $(git rev-list --tags --max-count=1))
-VERSION_PKG        := $(shell echo $(NETFLOW2NG_NAME) | sed 's/^v//g')
+VERSION_PKG        := $(shell echo $(NETFLOW2NG_VERSION) | sed 's/^v//g')
 ARCH               := x86_64
 LICENSE            := MIT
 URL                := https://github.com/synfinatic/netflow2ng
@@ -21,6 +21,11 @@ ALL: test-race vet test netflow2ng
 
 clean:
 	rm -rf dist
+
+clean-docker:
+	docker-compose -f docker-compose-pkg.yml rm -f
+	docker image rm netflow2ng_packager:latest
+	docker image rm synfinatic/netflow2ng:latest
 
 netflow2ng: $(OUTPUT_NETFLOW2NG)
 
