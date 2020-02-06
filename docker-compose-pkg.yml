@@ -1,0 +1,11 @@
+version: '3'
+services:
+  packager:
+    build: package
+    entrypoint: make
+    command:
+      - netflow2ng
+      - .package-deb
+      - .package-rpm
+    volumes:
+      - ./:/work/
