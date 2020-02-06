@@ -1,0 +1,11 @@
+[Unit]
+Description=NetFlow v9 collector for ntopng
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/default/netflow2ng
+ExecStart=/usr/bin/netflow2ng $NETFLOW2NG_ARGS
+
+[Install]
+WantedBy=multi-user.target
