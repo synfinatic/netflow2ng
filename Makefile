@@ -17,7 +17,9 @@ LDFLAGS            := '-X main.version=$(NETFLOW2NG_VERSION) -X main.buildinfos=
 
 OUTPUT_NETFLOW2NG  := $(DIST_DIR)netflow2ng-$(NETFLOW2NG_VERSION)-$(GOOS)-$(ARCH)$(EXTENSION)
 
-ALL: test-race vet test netflow2ng
+ALL: netflow2ng
+
+test: test-race vet unittest
 
 clean:
 	rm -rf dist
@@ -40,19 +42,19 @@ PHONY: docker-build
 docker-build:
 	docker build -t synfinatic/netflow2ng:latest .
 
-.PHONY: test
-test:
-	@echo testing code
+.PHONY: unittest
+unittest:
+	@echo running unit tests...
 	go test ./...
 
 .PHONY: vet
 vet:
-	@echo checking code is vetted
+	@echo checking code is vetted...
 	go vet $(shell go list ./...)
 
 .PHONY: test-race
 test-race:
-	@echo testing code for races
+	@echo testing code for races...
 	go test -race ./...
 
 .PHONY: prepare
