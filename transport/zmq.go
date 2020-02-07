@@ -51,6 +51,7 @@ type ZmqState struct {
  * https://github.com/ntop/ntopng
  */
 const ZMQ_MSG_VERSION = 2 // ntopng message version 2
+const URL_SIZE = 16       // ntopng topic max size
 var MessageId uint32 = 0  // Every ZMQ message we send should have a uniq ID
 
 type ZmqHeader struct {
@@ -69,9 +70,8 @@ func (nh ZmqHeader) Bytes(topic string) *[]byte {
 	b4 := make([]byte, 4)
 
 	// the url is really just the ZMQ topic
-	url := make([]byte, len(nh.url))
-	copy(url, []byte(topic))
-	header = append(header[:], url[:]...)
+	copy(nh.url[:], []byte(topic))
+	header = append(header[:], nh.url[:]...)
 
 	b1[0] = nh.version
 	header = append(header[:], b1[:]...)
@@ -85,8 +85,7 @@ func (nh ZmqHeader) Bytes(topic string) *[]byte {
 	header = append(header[:], b2[:]...)
 
 	// only thing in network byte order for v2 header :-/
-	MessageId++ // increment for each msg
-	binary.BigEndian.PutUint32(b4, MessageId)
+	binary.BigEndian.PutUint32(b4, nh.msg_id)
 	header = append(header[:], b4[:]...)
 
 	return &header
@@ -103,7 +102,10 @@ func RegisterZmqFlags() {
 func StartZmqProducer(listen string, topic string, log utils.Logger) (*ZmqState, error) {
 	context, _ := zmq.NewContext()
 	publisher, _ := context.NewSocket(zmq.PUB)
-	publisher.Bind(listen)
+	err := publisher.Bind(listen)
+	if err != nil {
+		log.Fatalf("%s", err)
+	}
 
 	if *ZmqSerialize != "json" && *ZmqSerialize != "pbuf" {
 		log.Fatalf("Invalid option: -zmq.serialize %s", *ZmqSerialize)
@@ -235,7 +237,10 @@ func (zs ZmqState) toJSON(flowMessage *flowmessage.FlowMessage) ([]byte, error) 
 	if *zs.compress {
 		var zbuf bytes.Buffer
 		z := zlib.NewWriter(&zbuf)
-		z.Write(jdata)
+		_, err := z.Write(jdata)
+		if err != nil {
+			return jdata, err
+		}
 		z.Close()
 		// must set jdata[0] = '\0' to indicate compressed data
 		jdata = nil
@@ -266,7 +271,9 @@ func (zs ZmqState) SendZmqMessage(flowMessage *flowmessage.FlowMessage) {
 		version:   ZMQ_MSG_VERSION,
 		source_id: uint8(*zs.source_id),
 		length:    msg_len,
+		msg_id:    MessageId,
 	}
+	MessageId++
 
 	// send our header with the topic first as a multi-part message
 	hbytes := *header.Bytes(*zs.topic)
@@ -274,8 +281,7 @@ func (zs ZmqState) SendZmqMessage(flowMessage *flowmessage.FlowMessage) {
 	if err != nil {
 		log.Error("Unable to send header: ", err)
 		return
-	}
-	if bytes != len(hbytes) {
+	} else if bytes != len(hbytes) {
 		log.Errorf("Wrote the wrong number of header bytes: %d", bytes)
 		return
 	}
@@ -285,7 +291,11 @@ func (zs ZmqState) SendZmqMessage(flowMessage *flowmessage.FlowMessage) {
 	if err != nil {
 		log.Error(err)
 		return
+	} else if bytes != len(msg) {
+		log.Errorf("Wrote the wrong number of message bytes: %d vs %d", bytes, len(msg))
+		return
 	}
+
 	if *zs.serialize == "json" {
 		if *zs.compress {
 			log.Debugf("sent %d bytes of zlib json:\n%s", msg_len, hex.Dump(msg))

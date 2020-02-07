@@ -4,6 +4,12 @@ GOOS ?= $(shell uname -s | tr "[:upper:]" "[:lower:]")
 ARCH ?= $(shell uname -m)
 BUILDINFOSDET ?=
 
+# find golangci-lint
+GOLANGCI_LINT ?= $(shell go env GOPATH)/bin/golangci-lint
+ifneq ($(shell test -e $(GOLANGCI_LINT) && echo -n yes),yes)
+    GOLANGCI_LINT = $(shell which golangci-lint)
+endif
+
 DOCKER_REPO        := synfinatic/
 NETFLOW2NG_NAME    := netflow2ng
 NETFLOW2NG_VERSION := $(shell git describe --tags 2>/dev/null $(git rev-list --tags --max-count=1))
@@ -20,6 +26,16 @@ OUTPUT_NETFLOW2NG  := $(DIST_DIR)netflow2ng-$(NETFLOW2NG_VERSION)-$(GOOS)-$(ARCH
 ALL: netflow2ng
 
 test: test-race vet unittest
+
+ci: test ci-tests
+
+.PHONY: ci-tests
+ci-tests:
+	@echo $(GOLANGCI_LINT)
+	$(GOLANGCI_LINT) run
+
+install-golangci-lint:
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell go env GOPATH)/bin v1.23.3
 
 clean:
 	rm -rf dist
