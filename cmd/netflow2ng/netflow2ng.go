@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 
-	"github.com/cloudflare/goflow/utils"
+	"github.com/cloudflare/goflow/v3/utils"
 	log "github.com/sirupsen/logrus"
 	"github.com/synfinatic/netflow2ng/transport"
 	"os"

@@ -15,6 +15,10 @@ github.com/cloudflare/goflow v1.1.1-0.20200131191721-699477c9d585 h1:DkKj4Ut0gWs
 github.com/cloudflare/goflow v1.1.1-0.20200131191721-699477c9d585/go.mod h1:V7tiwrrj0x9iwU2GZIUajIMACTEyihYYQOLIRjBLW0o=
 github.com/cloudflare/goflow v2.1.0+incompatible h1:dO5PeYcOY+Zaw90wBuZeY2vjuSVOBHE0EZcEVwnIaLE=
 github.com/cloudflare/goflow v2.1.0+incompatible/go.mod h1:vMwIgzmXREl4dComS53fm5SBKoL72VyDwv9m/uMiX2k=
+github.com/cloudflare/goflow/v3 v3.4.0 h1:Bz1M5/OVstzv//1S3z1AgVprtNAldVxs0MmZqBTM5RY=
+github.com/cloudflare/goflow/v3 v3.4.0/go.mod h1:dsjBeEcuW4+GYfadDjDV+b66F2RGlUxOL9tiXsSMhh0=
+github.com/cloudflare/goflow/v3 v3.4.1 h1:alX/PsiC3pmuP8/GQBCm/2MAluDSG5jNMjNjDCn4s9c=
+github.com/cloudflare/goflow/v3 v3.4.1/go.mod h1:dsjBeEcuW4+GYfadDjDV+b66F2RGlUxOL9tiXsSMhh0=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/eapache/go-resiliency v1.1.0/go.mod h1:kFI+JgMyC7bLPUVY133qvEBtVayf5mFgVsvEsIPBvNs=
