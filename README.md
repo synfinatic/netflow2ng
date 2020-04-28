@@ -15,8 +15,8 @@ Hence, I created netflow2ng.
 
 ### Installing
 
- 1. Make sure you have a recent version of go.  I used 1.14.2.   Older versions
-    may have problems.
+ 1. Make sure you have a recent version of go.  I used v1.14.2.   Older versions
+    may have problems, but v1.13 should be OK?
  1. `git clone https://github.com/synfinatic/netflow2ng.git`
  1. `cd netflow2ng`
  1. `make`
