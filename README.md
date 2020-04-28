@@ -26,7 +26,7 @@ Hence, I created netflow2ng.
  1. Configure your network device(s) to send NetFlow stats to netflow2ng
  1. Configure your [ntopng](https://www.ntop.org/products/traffic-analysis/ntop/)
     service to read from netflow2ng: `ntopng -i tcp://192.168.1.1:5556` where
-    "192.168.1.1." is the IP address of your netflow2ng server.
+    "192.168.1.1" is the IP address of your netflow2ng server.
 
 ### Features
 
@@ -56,3 +56,18 @@ I haven't bothered at this time.
  * No commercial support, etc.
  * May not support the latest versions/features of ntopng
  * Written in GoLang instead of C/C++
+
+### Project Status
+
+I created netflow2ng to:
+
+ 1. Learn GoLang
+ 2. Have better network visibilty on my home network
+
+I suppose #1 was successful (well to a point... there's still more to learn
+about Go), but #2 is basically on hold until I get better hardware.
+
+Unfortunately, I learned that enabling NetFlow on my USG reduced it's throughput
+by 90% (apparently turning on netflow disables hardware acceleration).  Hence,
+I'm not really able to use this until I get better hardware.  So until that
+happens you may not see much in terms of updates.
