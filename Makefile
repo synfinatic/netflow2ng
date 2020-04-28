@@ -11,7 +11,7 @@ VERSION_PKG        := $(shell echo $(NETFLOW2NG_VERSION) | sed 's/^v//g')
 ARCH               := x86_64
 LICENSE            := MIT
 URL                := https://github.com/synfinatic/netflow2ng
-DESCRIPTION        := NetFlow2ng: a NetFlow v9 collector to ntopng
+DESCRIPTION        := NetFlow2ng: a NetFlow v9 collector for ntopng
 BUILDINFOS         := ($(shell date +%FT%T%z)$(BUILDINFOSDET))
 LDFLAGS            := '-X main.version=$(NETFLOW2NG_VERSION) -X main.buildinfos=$(BUILDINFOS)'
 
@@ -28,6 +28,9 @@ clean-docker:
 	docker-compose -f docker-compose-pkg.yml rm -f
 	docker image rm netflow2ng_packager:latest
 	docker image rm synfinatic/netflow2ng:latest
+
+clean-go:
+	go clean -i -r -cache -modcache
 
 netflow2ng: $(OUTPUT_NETFLOW2NG)
 
