@@ -44,7 +44,7 @@ netflow2ng, please read the goflow docs.
 ### sFlow/IPFIX/etc support?
 
 In theory, adding sFlow/IPFIX/NetFlow v5 support should be pretty trivial, but
-I haven't bothered at this time.
+isn't something I plan on doing due to lack of hardware for testing/need.
 
 ### How is netflow2ng different from nProbe?
 
