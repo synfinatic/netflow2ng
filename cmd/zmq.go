@@ -1,7 +1,7 @@
-package transport
+package main
 
 /*
- * ZMQ Transport v2 supporting JSON/Protbuf
+ * ZMQ Transport v2 supporting JSON/Protobuf
  *
  * The zmq transport serializes the NetFlow/sFlow data as JSON objects or protobuf
  * and sends over [ZMQ](https://zeromq.org) and is intended to interop
@@ -16,130 +16,131 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"flag"
+	"fmt"
 	"net"
 	"strconv"
 	"time"
 
 	"github.com/cloudflare/goflow/v3/decoders/netflow"
 	flowmessage "github.com/cloudflare/goflow/v3/pb"
-	"github.com/cloudflare/goflow/v3/utils"
-	proto "github.com/golang/protobuf/proto"
+	// nolint SA1019 the new google.golang.org/protobuf/proto package is not backwards compatible
+	"github.com/golang/protobuf/proto"
 	zmq "github.com/pebbe/zmq4"
-)
-
-var (
-	ZmqListen    *string
-	ZmqTopic     *string
-	ZmqSourceId  *int
-	ZmqSerialize *string
-	ZmqCompress  *bool
 )
 
 type ZmqState struct {
 	context   *zmq.Context
 	publisher *zmq.Socket
-	topic     *string
-	log       *utils.Logger
-	source_id *int
-	serialize *string
-	compress  *bool
+	source_id int
+	serialize string
+	compress  bool
+}
+
+func StartZmqProducer() (*ZmqState, error) {
+	context, _ := zmq.NewContext()
+	publisher, _ := context.NewSocket(zmq.PUB)
+	if err := publisher.Bind(rctx.cli.ListenZmq); err != nil {
+		log.Fatalf("Unable to bind: %s", err.Error())
+	}
+
+	serialize := "json"
+	if rctx.cli.Protobuf {
+		serialize = "pbuf"
+	}
+
+	log.Infof("Started ZMQ listener on: %s", rctx.cli.ListenZmq)
+
+	//  Ensure subscriber connection has time to complete
+	time.Sleep(time.Second)
+	return &ZmqState{
+		context:   context,
+		publisher: publisher,
+		source_id: int(rctx.cli.SourceId),
+		serialize: serialize,
+		compress:  rctx.cli.Compress,
+	}, nil
 }
 
 /*
  * For more info on this you'll want to read:
- * ntop_typedefs.h, ntop_defines.h & CollectorInterface.cpp from
+ * include/ntop_typedefs.h, include/ntop_defines.h & src/ZMQCollectorInterface.cpp from
  * https://github.com/ntop/ntopng
  */
 const ZMQ_MSG_VERSION = 2 // ntopng message version 2
-var MessageId uint32 = 0  // Every ZMQ message we send should have a uniq ID
+const ZMQ_TOPIC = "flow"  // ntopng only really cares about the first character!
+
+var MessageId uint32 = 0 // Every ZMQ message we send should have a uniq ID
 
 type ZmqHeader struct {
-	url       [16]byte
+	url       string
 	version   uint8
 	source_id uint8
 	length    uint16
-	// msg_id    uint32
+	msg_id    uint32
+}
+
+func (zs *ZmqState) NewZmqHeader(length uint16) *ZmqHeader {
+	z := &ZmqHeader{
+		url:       ZMQ_TOPIC,
+		version:   ZMQ_MSG_VERSION,
+		source_id: uint8(rctx.cli.SourceId),
+		length:    length,
+		msg_id:    MessageId,
+	}
+	MessageId++
+	return z
 }
 
 // Serialize our ZmqHeader into a byte array
-func (nh *ZmqHeader) Bytes(topic string) *[]byte {
-	var header []byte
-	b1 := make([]byte, 1)
-	b2 := make([]byte, 2)
-	b4 := make([]byte, 4)
+func (zh *ZmqHeader) Bytes() ([]byte, error) {
+	header := []byte{}
+	bBuf := bytes.NewBuffer(header)
 
-	// the url is really just the ZMQ topic
-	url := make([]byte, len(nh.url))
-	copy(url, []byte(topic))
-	header = append(header[:], url[:]...)
+	url := []byte{}
+	uBuf := bytes.NewBuffer(url)
 
-	b1[0] = nh.version
-	header = append(header[:], b1[:]...)
-
-	// source_id in NetFlow is 32bit, but only 8bit here
-	b1[0] = uint8(nh.source_id)
-	header = append(header[:], b1[:]...)
-
-	// length isn't actually used by the receiver, but we set it anyways
-	binary.LittleEndian.PutUint16(b2, nh.length)
-	header = append(header[:], b2[:]...)
-
-	// only thing in network byte order for v2 header :-/
-	MessageId++ // increment for each msg
-	binary.BigEndian.PutUint32(b4, MessageId)
-	header = append(header[:], b4[:]...)
-
-	return &header
-}
-
-func RegisterZmqFlags() {
-	ZmqListen = flag.String("zmq.listen", "tcp://*:5556", "IP/Port to listen for ZMQ connections")
-	ZmqTopic = flag.String("zmq.topic", "flow", "ZMQ Topic to publish on")
-	ZmqSourceId = flag.Int("zmq.source_id", 0x01, "NetFlow SourceId (0x01-0xff)")
-	ZmqSerialize = flag.String("zmq.serialize", "json", "Serialize data as {json|pbuf}")
-	ZmqCompress = flag.Bool("zmq.compress", false, "Compress json data")
-}
-
-func StartZmqProducer(listen string, topic string, log utils.Logger) (*ZmqState, error) {
-	context, _ := zmq.NewContext()
-	publisher, _ := context.NewSocket(zmq.PUB)
-	if err := publisher.Bind(listen); err != nil {
-		log.Fatalf("Unable to bind: %s", err.Error())
+	i, err := uBuf.Write([]byte(zh.url))
+	if err != nil {
+		return nil, err
 	}
 
-	if *ZmqSerialize != "json" && *ZmqSerialize != "pbuf" {
-		log.Fatalf("Invalid option: -zmq.serialize %s", *ZmqSerialize)
+	// pad out to 16 bytes
+	for ; i < 16; i++ {
+		if _, err = uBuf.Write([]byte{0}); err != nil {
+			return nil, err
+		}
 	}
 
-	if *ZmqSourceId < 0 || *ZmqSourceId > 255 {
-		log.Fatalf("Invalid option: -zmq.source_id %d", *ZmqSourceId)
+	i, err = bBuf.Write(uBuf.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	if i != 16 {
+		return nil, fmt.Errorf("URL was %d bytes instead of 16", i)
 	}
 
-	//  Ensure subscriber connection has time to complete
-	time.Sleep(time.Second)
-	state := ZmqState{
-		context:   context,
-		publisher: publisher,
-		topic:     &topic,
-		log:       &log,
-		source_id: ZmqSourceId,
-		serialize: ZmqSerialize,
-		compress:  ZmqCompress,
+	if _, err = bBuf.Write([]byte{zh.version, zh.source_id}); err != nil {
+		return nil, err
 	}
 
-	log.Infof("Started ZMQ listener on: %s", listen)
-	return &state, nil
-}
+	be16Buf := make([]byte, 2)
+	binary.BigEndian.PutUint16(be16Buf, zh.length)
+	if _, err = bBuf.Write(be16Buf); err != nil {
+		return nil, err
+	}
 
-func StartZmqProducerFromArgs(log utils.Logger) (*ZmqState, error) {
-	return StartZmqProducer(*ZmqListen, *ZmqTopic, log)
+	be32Buf := make([]byte, 4)
+	binary.BigEndian.PutUint32(be32Buf, zh.msg_id)
+	if _, err = bBuf.Write(be32Buf); err != nil {
+		return nil, err
+	}
+	return bBuf.Bytes(), nil
 }
 
 /*
  * Converts a FlowMessage to JSON for ntopng
  */
-func (zs ZmqState) toJSON(flowMessage *flowmessage.FlowMessage) ([]byte, error) {
+func (zs *ZmqState) toJSON(flowMessage *flowmessage.FlowMessage) ([]byte, error) {
 	ip6 := make(net.IP, net.IPv6len)
 	ip4 := make(net.IP, net.IPv4len)
 	hwaddr := make(net.HardwareAddr, 6)
@@ -235,25 +236,34 @@ func (zs ZmqState) toJSON(flowMessage *flowmessage.FlowMessage) ([]byte, error) 
 		return jdata, err
 	}
 
-	if *zs.compress {
+	if zs.compress {
 		var zbuf bytes.Buffer
 		z := zlib.NewWriter(&zbuf)
-		_, _ = z.Write(jdata)
-		z.Close()
+		if _, err = z.Write(jdata); err != nil {
+			return []byte{}, err
+		}
+		if err = z.Close(); err != nil {
+			return []byte{}, err
+		}
 		// must set jdata[0] = '\0' to indicate compressed data
-		jdata = nil
+		jdata = nil // zero current buffer
 		jdata = append(jdata, 0)
 		jdata = append(jdata, zbuf.Bytes()...)
 	}
 	return jdata, nil
 }
 
-func (zs ZmqState) SendZmqMessage(flowMessage *flowmessage.FlowMessage) {
-	log := *zs.log
+func (zs *ZmqState) Publish(msgs []*flowmessage.FlowMessage) {
+	for _, msg := range msgs {
+		zs.SendZmqMessage(msg)
+	}
+}
+
+func (zs *ZmqState) SendZmqMessage(flowMessage *flowmessage.FlowMessage) {
 	var msg []byte
 	var err error
 
-	if *zs.serialize == "pbuf" {
+	if zs.serialize == "pbuf" {
 		msg, err = proto.Marshal(flowMessage)
 	} else {
 		msg, err = zs.toJSON(flowMessage)
@@ -265,17 +275,18 @@ func (zs ZmqState) SendZmqMessage(flowMessage *flowmessage.FlowMessage) {
 	}
 	msg_len := uint16(len(msg))
 
-	header := ZmqHeader{
-		version:   ZMQ_MSG_VERSION,
-		source_id: uint8(*zs.source_id),
-		length:    msg_len,
-	}
+	header := zs.NewZmqHeader(msg_len)
 
 	// send our header with the topic first as a multi-part message
-	hbytes := *header.Bytes(*zs.topic)
+	hbytes, err := header.Bytes()
+	if err != nil {
+		log.Errorf("Unable to serialize header: %s", err.Error())
+		return
+	}
+
 	bytes, err := zs.publisher.SendBytes(hbytes, zmq.SNDMORE)
 	if err != nil {
-		log.Error("Unable to send header: ", err)
+		log.Errorf("Unable to send header: %s", err.Error())
 		return
 	}
 	if bytes != len(hbytes) {
@@ -284,24 +295,18 @@ func (zs ZmqState) SendZmqMessage(flowMessage *flowmessage.FlowMessage) {
 	}
 
 	// now send the actual JSON payload
-	bytes, err = zs.publisher.SendBytes(msg, 0)
-	if err != nil {
+	if _, err = zs.publisher.SendBytes(msg, 0); err != nil {
 		log.Error(err)
 		return
 	}
-	if *zs.serialize == "json" {
-		if *zs.compress {
+
+	if zs.serialize == "json" {
+		if zs.compress {
 			log.Debugf("sent %d bytes of zlib json:\n%s", msg_len, hex.Dump(msg))
 		} else {
 			log.Debugf("sent %d bytes of json: %s", msg_len, string(msg))
 		}
 	} else {
 		log.Debugf("sent %d bytes of pbuf:\n%s", msg_len, hex.Dump(msg))
-	}
-}
-
-func (zs ZmqState) Publish(msgs []*flowmessage.FlowMessage) {
-	for _, msg := range msgs {
-		zs.SendZmqMessage(msg)
 	}
 }

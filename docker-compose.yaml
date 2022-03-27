@@ -1,0 +1,11 @@
+version: "2.2"
+services:
+    netflow2ng:
+        container_name: netflow2ng
+        restart: unless-stopped
+        image: synfinatic/netflow2ng:v0.0.3
+        entrypoint: /netflow2ng # --level=debug
+        ports:
+            - 5556:5556/tcp
+            - 8080:8080/tcp
+            - 2055:2055/udp
