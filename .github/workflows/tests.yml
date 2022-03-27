@@ -1,0 +1,34 @@
+name: Tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # The branches below must be a subset of the branches above
+    branches: [main]
+jobs:
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Set up Go 1.17
+      uses: actions/setup-go@v1
+      with:
+        go-version: 1.17
+      id: go
+
+    - name: install zmq headers
+      run: sudo apt-get update && sudo apt-get install -y libzmq3-dev
+
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v2
+
+    - name: Tests
+      run: make vet unittest test-tidy test-fmt
+    
+    - name: Build a binary
+      run: make # not all binaries to help speed up builds
+
+    - name: Upload to codecov
+      uses: codecov/codecov-action@v2

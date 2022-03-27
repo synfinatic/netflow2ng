@@ -6,7 +6,7 @@ BUILDINFOSDET ?=
 
 DOCKER_REPO        := synfinatic/
 NETFLOW2NG_NAME    := netflow2ng
-NETFLOW2NG_VERSION := $(shell git describe --tags 2>/dev/null $(git rev-list --tags --max-count=1))
+NETFLOW2NG_VERSION := 0.0.3
 VERSION_PKG        := $(shell echo $(NETFLOW2NG_VERSION) | sed 's/^v//g')
 ARCH               := x86_64
 LICENSE            := MIT
@@ -19,7 +19,9 @@ OUTPUT_NETFLOW2NG  := $(DIST_DIR)netflow2ng-$(NETFLOW2NG_VERSION)-$(GOOS)-$(ARCH
 
 ALL: netflow2ng
 
-test: test-race vet unittest
+test: vet unittest lint ## Run important tests
+
+precheck: test test-fmt test-tidy ## Run all tests that happen in a PR
 
 clean:
 	rm -rf dist
@@ -45,10 +47,10 @@ PHONY: docker-build
 docker-build:
 	docker build -t synfinatic/netflow2ng:latest .
 
+
 .PHONY: unittest
-unittest:
-	@echo running unit tests...
-	go test ./...
+unittest: ## Run go unit tests
+	go test -race -covermode=atomic -coverprofile=coverage.out  ./...
 
 .PHONY: vet
 vet:
@@ -59,6 +61,29 @@ vet:
 test-race:
 	@echo testing code for races...
 	go test -race ./...
+
+.PHONY: fmt
+fmt: ## Format Go code
+	@go fmt cmd
+
+.PHONY: test-fmt
+test-fmt: fmt ## Test to make sure code if formatted correctly
+	@if test `git diff cmd | wc -l` -gt 0; then \
+	    echo "Code changes detected when running 'go fmt':" ; \
+	    git diff -Xfiles ; \
+	    exit -1 ; \
+	fi
+
+.PHONY: test-tidy
+test-tidy:  ## Test to make sure go.mod is tidy
+	@go mod tidy
+	@if test `git diff go.mod | wc -l` -gt 0; then \
+	    echo "Need to run 'go mod tidy' to clean up go.mod" ; \
+	    exit -1 ; \
+	fi
+
+lint:  ## Run golangci-lint
+	golangci-lint run
 
 .PHONY: prepare
 prepare:

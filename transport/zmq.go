@@ -17,14 +17,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"flag"
+	"net"
+	"strconv"
+	"time"
+
 	"github.com/cloudflare/goflow/v3/decoders/netflow"
 	flowmessage "github.com/cloudflare/goflow/v3/pb"
 	"github.com/cloudflare/goflow/v3/utils"
 	proto "github.com/golang/protobuf/proto"
 	zmq "github.com/pebbe/zmq4"
-	"net"
-	"strconv"
-	"time"
 )
 
 var (
@@ -58,11 +59,11 @@ type ZmqHeader struct {
 	version   uint8
 	source_id uint8
 	length    uint16
-	msg_id    uint32
+	// msg_id    uint32
 }
 
 // Serialize our ZmqHeader into a byte array
-func (nh ZmqHeader) Bytes(topic string) *[]byte {
+func (nh *ZmqHeader) Bytes(topic string) *[]byte {
 	var header []byte
 	b1 := make([]byte, 1)
 	b2 := make([]byte, 2)
@@ -103,7 +104,9 @@ func RegisterZmqFlags() {
 func StartZmqProducer(listen string, topic string, log utils.Logger) (*ZmqState, error) {
 	context, _ := zmq.NewContext()
 	publisher, _ := context.NewSocket(zmq.PUB)
-	publisher.Bind(listen)
+	if err := publisher.Bind(listen); err != nil {
+		log.Fatalf("Unable to bind: %s", err.Error())
+	}
 
 	if *ZmqSerialize != "json" && *ZmqSerialize != "pbuf" {
 		log.Fatalf("Invalid option: -zmq.serialize %s", *ZmqSerialize)
@@ -235,7 +238,7 @@ func (zs ZmqState) toJSON(flowMessage *flowmessage.FlowMessage) ([]byte, error) 
 	if *zs.compress {
 		var zbuf bytes.Buffer
 		z := zlib.NewWriter(&zbuf)
-		z.Write(jdata)
+		_, _ = z.Write(jdata)
 		z.Close()
 		// must set jdata[0] = '\0' to indicate compressed data
 		jdata = nil
