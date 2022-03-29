@@ -11,14 +11,9 @@ else
 GOARCH             := $(ARCH)  # no idea if this works for other platforms....
 endif
 
-ifneq ($(BREW_INSTALL),1)
 PROJECT_TAG               := $(shell git describe --tags 2>/dev/null $(git rev-list --tags --max-count=1))
 PROJECT_COMMIT            := $(shell git rev-parse HEAD || echo "")
 PROJECT_DELTA             := $(shell DELTA_LINES=$$(git diff | wc -l); if [ $${DELTA_LINES} -ne 0 ]; then echo $${DELTA_LINES} ; else echo "''" ; fi)
-else
-PROJECT_TAG               := Homebrew
-
-endif
 
 BUILDINFOSDET ?=
 PROGRAM_ARGS ?=
@@ -53,8 +48,8 @@ clean:
 
 clean-docker:
 	docker-compose -f docker-compose-pkg.yml rm -f
-	docker image rm netflow2ng_packager:v${PROJECT_VERSION}
-	docker image rm synfinatic/netflow2ng:v${PROJECT_VERSION}
+	docker image rm netflow2ng_packager:v$(PROJECT_VERSION)
+	docker image rm $(DOCKER_REPO)/$(PROJECT_NAME):v$(PROJECT_VERSION)
 
 clean-go:
 	go clean -i -r -cache -modcache
@@ -70,12 +65,18 @@ docker-run:  ## Run docker container locally
 		-p 5556:5556/tcp \
 		-p 8080:8080/tcp \
 		-p 2055:2055/udp \
-		synfinatic/${PROJECT_NAME}:v${PROJECT_VERSION}
+		$(DOCKER_REPO)/$(PROJECT_NAME):v$(PROJECT_VERSION)
 
 PHONY: docker
 docker:  ## Build docker image
-	docker build -t synfinatic/netflow2ng:v${PROJECT_VERSION} .
+	docker build -t $(DOCKER_REPO)/$(PROJECT_NAME):v$(PROJECT_VERSION) .
 
+docker-release: ## Tag and push docker images Linux AMD64
+	docker build \
+		-t $(DOCKER_REPO)/$(PROJECT_NAME):v$(PROJECT_VERSION) \
+		-t $(DOCKER_REPO)/$(PROJECT_NAME):latest \
+		--build-arg VERSION=v$(PROJECT_VERSION) \
+		--push -f Dockerfile .
 
 .PHONY: unittest
 unittest: ## Run go unit tests
