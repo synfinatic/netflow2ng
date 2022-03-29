@@ -15,6 +15,7 @@ Hence, I created netflow2ng.
 
 ### Installing
 
+##### Build From Source
  1. Make sure you have a recent version of go.  I used 1.14.2.   Older versions
     may have problems.
  1. `git clone https://github.com/synfinatic/netflow2ng.git`
@@ -22,11 +23,18 @@ Hence, I created netflow2ng.
  1. `make`
  1. The binary should now be in the `dist` directory.  Copy it somewhere
     appropriate and create the necessary startup script(s).
+
+##### Install via Docker
+
+ 1. Pull the latest [docker image](https://hub.docker.com/r/synfinatic/netflow2ng)
+ 1. Use the optional [docker-compose.yaml](docker-compose.yaml) file
+
+### Configuration
  1. For a list of configuration arguments, run `netflow2ng -h`
  1. Configure your network device(s) to send NetFlow stats to netflow2ng
  1. Configure your [ntopng](https://www.ntop.org/products/traffic-analysis/ntop/)
     service to read from netflow2ng: `ntopng -i tcp://192.168.1.1:5556` where
-    "192.168.1.1." is the IP address of your netflow2ng server.
+    "192.168.1.1" is the IP address of your netflow2ng server.
 
 ### Features
 
