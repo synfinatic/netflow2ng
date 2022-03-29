@@ -76,7 +76,9 @@ docker-release: ## Tag and push docker images Linux AMD64
 		-t $(DOCKER_REPO)/$(PROJECT_NAME):v$(PROJECT_VERSION) \
 		-t $(DOCKER_REPO)/$(PROJECT_NAME):latest \
 		--build-arg VERSION=v$(PROJECT_VERSION) \
-		--push -f Dockerfile .
+		-f Dockerfile .
+	docker push $(DOCKER_REPO)/$(PROJECT_NAME):v$(PROJECT_VERSION)
+	docker push $(DOCKER_REPO)/$(PROJECT_NAME):latest
 
 .PHONY: unittest
 unittest: ## Run go unit tests
