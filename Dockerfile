@@ -7,7 +7,7 @@ RUN apk update --no-cache && \
 COPY . /build
 WORKDIR /build
 
-RUN go build -ldflags "${LDFLAGS}" -o netflow2ng cmd/netflow2ng/netflow2ng.go
+RUN OUTPUT_NAME=dist/netflow2ng make
 
 FROM alpine:latest
 ARG src_dir
@@ -16,7 +16,7 @@ RUN apk update --no-cache && \
     apk add libzmq && \
     adduser -S -D -H -h / netflow
 USER netflow
-COPY --from=builder /build/netflow2ng /
+COPY --from=builder /build/dist/netflow2ng /
 
 # ZMQ
 EXPOSE 5556/tcp
@@ -24,5 +24,5 @@ EXPOSE 5556/tcp
 EXPOSE 2055/udp
 # webserver
 EXPOSE 8080/tcp
-ENTRYPOINT ["/netflow2ng", "-zmq.compress"]
+ENTRYPOINT ["/netflow2ng"]
 
