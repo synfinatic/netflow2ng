@@ -230,6 +230,15 @@ func (zs *ZmqState) toJSON(flowMessage *flowmessage.FlowMessage) ([]byte, error)
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_SRC_VLAN)] = flowMessage.SrcVlan
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_DST_VLAN)] = flowMessage.DstVlan
 
+	// Flow Exporter IP
+	if len(flowMessage.SamplerAddress) == 4 {
+		copy(ip4, flowMessage.SamplerAddress)
+		retmap[strconv.Itoa(netflow.IPFIX_FIELD_exporterIPv4Address)] = ip4.String()
+	} else if len(flowMessage.SamplerAddress) == 16 {
+		copy(ip6, flowMessage.SamplerAddress)
+		retmap[strconv.Itoa(netflow.IPFIX_FIELD_exporterIPv6Address)] = ip6.String()
+	}
+
 	// convert to JSON
 	jdata, err := json.Marshal(retmap)
 	if err != nil {
