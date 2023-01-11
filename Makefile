@@ -33,8 +33,8 @@ DESCRIPTION               := NetFlow2ng: a NetFlow v9 collector for ntopng
 BUILDINFOS                := $(shell date +%FT%T%z)$(BUILDINFOSDET)
 HOSTNAME                  := $(shell hostname)
 LDFLAGS                   := -X "main.Version=$(PROJECT_VERSION)" -X "main.Delta=$(PROJECT_DELTA)" -X "main.Buildinfos=$(BUILDINFOS)" -X "main.Tag=$(PROJECT_TAG)" -X "main.CommitID=$(PROJECT_COMMIT)"
-OUTPUT_NAME               ?= $(DIST_DIR)$(PROJECT_NAME)-$(PROJECT_VERSION)  # default for current platform
-
+# default for current platform:
+OUTPUT_NAME               ?= $(DIST_DIR)$(PROJECT_NAME)-$(PROJECT_VERSION)
 ALL: netflow2ng
 
 include help.mk
@@ -146,6 +146,7 @@ package:  ## Build .deb and .rpm packages
         --url "$(URL)" \
         --architecture $(ARCH) \
         --license "$(LICENSE) "\
+	--depends "zeromq" \
         --package $(DIST_DIR) \
         $(OUTPUT_NAME)=/usr/bin/netflow2ng \
         package/netflow2ng.service=/lib/systemd/system/netflow2ng.service \
