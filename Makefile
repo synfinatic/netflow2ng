@@ -1,4 +1,4 @@
-PROJECT_VERSION := 0.0.3
+PROJECT_VERSION := 0.0.4
 DOCKER_REPO     := synfinatic
 PROJECT_NAME    := netflow2ng
 
