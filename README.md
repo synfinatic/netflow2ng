@@ -1,6 +1,9 @@
 # netflow2ng
 NetFlow v9 collector for [ntopng](https://www.ntop.org/products/traffic-analysis/ntop/)
 
+[![Tests](https://github.com/synfinatic/netflow2ng/actions/workflows/tests.yml/badge.svg)](https://github.com/synfinatic/netflow2ng/actions/workflows/tests.yml)
+[![golangci-lint](https://github.com/synfinatic/netflow2ng/actions/workflows/golangci-lint.yaml/badge.svg)](https://github.com/synfinatic/netflow2ng/actions/workflows/golangci-lint.yaml)
+
 ### TL;DR
 
 ntopng is a free/commercial NetFlow/sFlow analysis console suitible for a
