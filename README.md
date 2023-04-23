@@ -2,6 +2,7 @@
 NetFlow v9 collector for [ntopng](https://www.ntop.org/products/traffic-analysis/ntop/)
 
 [![Tests](https://github.com/synfinatic/netflow2ng/actions/workflows/tests.yml/badge.svg)](https://github.com/synfinatic/netflow2ng/actions/workflows/tests.yml)
+[![codeql-analysis.yml](https://github.com/synfinatic/netflow2ng/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/synfinatic/netflow2ng/actions/workflows/codeql-analysis.yml)
 [![golangci-lint](https://github.com/synfinatic/netflow2ng/actions/workflows/golangci-lint.yaml/badge.svg)](https://github.com/synfinatic/netflow2ng/actions/workflows/golangci-lint.yaml)
 
 ### TL;DR
