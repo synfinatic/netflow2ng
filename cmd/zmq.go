@@ -23,6 +23,7 @@ import (
 
 	"github.com/cloudflare/goflow/v3/decoders/netflow"
 	flowmessage "github.com/cloudflare/goflow/v3/pb"
+
 	// nolint SA1019 the new google.golang.org/protobuf/proto package is not backwards compatible
 	"github.com/golang/protobuf/proto"
 	zmq "github.com/pebbe/zmq4"
@@ -167,6 +168,7 @@ func (zs *ZmqState) toJSON(flowMessage *flowmessage.FlowMessage) ([]byte, error)
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_PROTOCOL)] = flowMessage.Proto
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_L4_SRC_PORT)] = flowMessage.SrcPort
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_L4_DST_PORT)] = flowMessage.DstPort
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_TCP_FLAGS)] = flowMessage.TCPFlags
 
 	// Network
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_SRC_AS)] = flowMessage.SrcAS
@@ -176,12 +178,12 @@ func (zs *ZmqState) toJSON(flowMessage *flowmessage.FlowMessage) ([]byte, error)
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_INPUT_SNMP)] = flowMessage.InIf
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_OUTPUT_SNMP)] = flowMessage.OutIf
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_FORWARDING_STATUS)] = flowMessage.ForwardingStatus
-	retmap[strconv.Itoa(netflow.NFV9_FIELD_SRC_TOS)] = flowMessage.IPTos
-	retmap[strconv.Itoa(netflow.NFV9_FIELD_TCP_FLAGS)] = flowMessage.TCPFlags
-	retmap[strconv.Itoa(netflow.NFV9_FIELD_MIN_TTL)] = flowMessage.IPTTL
 
 	// IP
-	if flowMessage.Etype == 0x800 {
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_SRC_TOS)] = flowMessage.IPTos
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_MIN_TTL)] = flowMessage.IPTTL
+	switch flowMessage.Etype {
+	case 0x800: // IPv4
 		retmap[strconv.Itoa(netflow.NFV9_FIELD_IP_PROTOCOL_VERSION)] = 4
 		// IPv4
 		copy(ip4, flowMessage.SrcAddr)
@@ -196,8 +198,7 @@ func (zs *ZmqState) toJSON(flowMessage *flowmessage.FlowMessage) ([]byte, error)
 		retmap[strconv.Itoa(netflow.NFV9_FIELD_FRAGMENT_OFFSET)] = flowMessage.FragmentOffset
 		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_SRC_MASK)] = flowMessage.SrcNet
 		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_DST_MASK)] = flowMessage.DstNet
-	} else {
-		// 0x86dd IPv6
+	case 0x86dd: // IPv6
 		retmap[strconv.Itoa(netflow.NFV9_FIELD_IP_PROTOCOL_VERSION)] = 6
 		copy(ip6, flowMessage.SrcAddr)
 		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_SRC_ADDR)] = ip6.String()
@@ -208,6 +209,8 @@ func (zs *ZmqState) toJSON(flowMessage *flowmessage.FlowMessage) ([]byte, error)
 		copy(ip6, flowMessage.NextHop)
 		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_NEXT_HOP)] = ip6.String()
 		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_FLOW_LABEL)] = flowMessage.IPv6FlowLabel
+	default:
+		// unknown
 	}
 
 	// ICMP

@@ -54,7 +54,6 @@ func (a *Address) Value() (string, int) {
 
 type CLI struct {
 	Listen Address `kong:"short='a',help='NetFlow/IPFIX listen address:port',default='0.0.0.0:2055'"`
-	Reuse  bool    `kong:"help='Enable SO_REUSEPORT for NetFlow/IPFIX listen port'"`
 
 	Metrics Address `kong:"short='m',help='Metrics listen address',default='0.0.0.0:8080'"`
 
@@ -88,7 +87,7 @@ func main() {
 	parser := kong.Must(
 		&rctx.cli,
 		kong.Name("netflow2ng"),
-		kong.Description("NetFlow v9/IPFIX Proxy for ntopng"),
+		kong.Description("NetFlow v9 Proxy for ntopng"),
 		kong.UsageOnError(),
 	)
 
@@ -135,7 +134,7 @@ func main() {
 		"Type": "NetFlow"}).
 		Infof("Listening on UDP %s", rctx.cli.Listen)
 
-	if err = s.FlowRoutine(rctx.cli.Workers, ip, port, rctx.cli.Reuse); err != nil {
+	if err = s.FlowRoutine(rctx.cli.Workers, ip, port, true); err != nil {
 		log.Fatalf("Fatal error: could not listen to UDP (%v)", err)
 	}
 }
