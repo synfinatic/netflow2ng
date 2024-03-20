@@ -1,11 +1,28 @@
-version: "2.2"
+version: "3.8"
+
 services:
-    netflow2ng:
-        container_name: netflow2ng
-        restart: unless-stopped
-        image: synfinatic/netflow2ng:v0.0.3
-        entrypoint: /netflow2ng # --level=debug
-        ports:
-            - 5556:5556/tcp
-            - 8080:8080/tcp
-            - 2055:2055/udp
+  netflow2ng:
+    container_name: netflow2ng
+    restart: unless-stopped
+    image: synfinatic/netflow2ng:v0.0.5
+    entrypoint: /netflow2ng # --level=debug
+    ports:
+      - 5556:5556/tcp
+      - 8080:8080/tcp
+      - 2055:2055/udp
+
+  ntopng:
+    container_name: ntopng
+    image: ntop/ntopng:stable
+    command: /ntopng.conf
+    ports:
+      - 3000:3000
+    volumes:
+      - ./ntopng.conf:/ntopng.conf
+      - data:/var/lib/ntopng
+    environment:
+      - TZ=UTC
+
+volumes:
+  data:
+

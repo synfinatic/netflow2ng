@@ -20,8 +20,7 @@ Hence, I created netflow2ng.
 ### Installing
 
 ##### Build From Source
- 1. Make sure you have a recent version of go.  I used 1.14.2.   Older versions
-    may have problems.
+ 1. Make sure you have a recent version of go.
  1. `git clone https://github.com/synfinatic/netflow2ng.git`
  1. `cd netflow2ng`
  1. `make`
@@ -37,7 +36,7 @@ Hence, I created netflow2ng.
  1. For a list of configuration arguments, run `netflow2ng -h`
  1. Configure your network device(s) to send NetFlow stats to netflow2ng
  1. Configure your [ntopng](https://www.ntop.org/products/traffic-analysis/ntop/)
-    service to read from netflow2ng: `ntopng -i tcp://192.168.1.1:5556` where
+    service to read from netflow2ng: `ntopng -i zmq://192.168.1.1:5556` where
     "192.168.1.1" is the IP address of your netflow2ng server.
 
 ### Features
@@ -55,7 +54,7 @@ netflow2ng, please read the goflow docs.
 
 ### sFlow/IPFIX/etc support?
 
-In theory, adding sFlow/IPFIX/NetFlow v5 support should be pretty trivial, but
+In theory, adding sFlow/IPFIX (NetFlow v10)/NetFlow v5 support should be pretty trivial, but
 isn't something I plan on doing due to lack of hardware for testing/need.
 
 ### How is netflow2ng different from nProbe?
