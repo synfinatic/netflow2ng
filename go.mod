@@ -3,7 +3,7 @@ module github.com/synfinatic/netflow2ng
 go 1.23
 
 require (
-	github.com/alecthomas/kong v1.2.1
+	github.com/alecthomas/kong v1.7.0
 	github.com/cloudflare/goflow/v3 v3.4.5
 	github.com/golang/protobuf v1.5.4
 	github.com/pebbe/zmq4 v1.2.11
