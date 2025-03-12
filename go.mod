@@ -6,7 +6,7 @@ require (
 	github.com/alecthomas/kong v1.2.1
 	github.com/cloudflare/goflow/v3 v3.4.5
 	github.com/golang/protobuf v1.5.4
-	github.com/pebbe/zmq4 v1.2.11
+	github.com/pebbe/zmq4 v1.3.0
 	github.com/prometheus/client_golang v1.20.3
 	github.com/sirupsen/logrus v1.9.3
 )
