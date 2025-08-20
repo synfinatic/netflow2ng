@@ -63,6 +63,7 @@ type CLI struct {
 	SourceId  SourceId `kong:"help='NetFlow SourceId (0-255)',default=0"`
 	Compress  bool     `kong:"help='Compress ZMQ JSON data',xor='zmq-data'"`
 	Protobuf  bool     `kong:"help='Use ProtoBuff instead of JSQN for ZMQ',xor='zmq-data'"`
+	TLV       bool     `kong:"help='Use TLV instead of JSQN for ZMQ (needed for ntopng 6.4 and later)',xor='zmq-data'"`
 
 	Workers   int    `kong:"short='w',help='Number of NetFlow workers',default=1"`
 	LogLevel  string `kong:"short='l',help='Log level [error|warn|info|debug|trace]',default='info',enum='error,warn,info,debug,trace'"`
