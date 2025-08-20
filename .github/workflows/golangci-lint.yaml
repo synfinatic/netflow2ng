@@ -25,7 +25,7 @@ jobs:
       - name: install zmq headers
         run: sudo apt-get update && sudo apt-get install -y libzmq3-dev
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
