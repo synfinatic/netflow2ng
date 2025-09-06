@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -55,7 +54,7 @@ type SourceId int
 
 func (s *SourceId) Validate() error {
 	if *s < 0 || *s > 255 {
-		return fmt.Errorf("must be betweeen 0 and 255")
+		return fmt.Errorf("must be between 0 and 255")
 	}
 	return nil
 }
@@ -86,25 +85,11 @@ type CLI struct {
 	Protobuf  bool     `kong:"help='Use ProtoBuff instead of JSQN for ZMQ',xor='zmq-data'"`
 	TLV       bool     `kong:"help='Use TLV instead of JSQN for ZMQ (needed for ntopng 6.4 and later)',xor='zmq-data'"`
 
-	Workers   int    `kong:"short='w',help='Number of NetFlow workers',default=1"`
+	Workers   int    `kong:"short='w',help='Number of NetFlow workers',default=2"`
 	LogLevel  string `kong:"short='l',help='Log level [error|warn|info|debug|trace]',default='info',enum='error,warn,info,debug,trace'"`
 	LogFormat string `kong:"short='f',help='Log format [default|json]',default='default',enum='default,json'"`
 	Version   bool   `kong:"short='v',help='Print version and copyright info'"`
 }
-
-// goflow supported serving up the NFv9 templates via http. Goflow2 doesn't.
-// TODO: Add an http endpoint that grabs the NFv9 templates from goflow2/decoders/netflow/templates.go
-//
-//	and serves up a plain text list that go go our over http.
-/*func httpServer(metricsAddress string) {
-	http.Handle("/metrics", promhttp.Handler())
-	//http.HandleFunc("/templates", state.ServeHTTPTemplates)
-	log.Fatal(http.ListenAndServe(metricsAddress, nil))
-}*/
-
-// FreeBSD/pfSense/OPNsense has a bug where OUT_BYTES are included, but always 0. We need to
-// map OUT_BYTES to some other field, so goflow processing doesn't overwrite IN_BYTES with this
-// zeros.
 
 func LoadMappingYaml() (*protoproducer.ProducerConfig, error) {
 	config := &protoproducer.ProducerConfig{}
@@ -113,6 +98,8 @@ func LoadMappingYaml() (*protoproducer.ProducerConfig, error) {
 	return config, err
 }
 
+// This entire main() is heavily based on cmd/main.go from netsampler/goflow2.
+// It can probably be simplified a bit more, but it works for now.
 func main() {
 	var err error
 	log = logrus.New()
@@ -138,6 +125,13 @@ func main() {
 	}
 
 	lvl, _ := logrus.ParseLevel(rctx.cli.LogLevel)
+	switch rctx.cli.LogFormat {
+	case "json":
+		log.SetFormatter(&logrus.JSONFormatter{})
+	case "default":
+		log.Debugf("Using default log style")
+	}
+
 	log.SetLevel(lvl)
 	localformatters.SetLogger(log)
 	localtransport.SetLogger(log)
@@ -178,8 +172,7 @@ func main() {
 	// We use our own mapping config to keep goflow2 from overwriting IN_BYTES with 0 from OUT_BYTES
 	cfgProducer, err := LoadMappingYaml()
 	if err != nil {
-		slog.Error("error loading mapping", slog.String("error", err.Error()))
-		os.Exit(1)
+		log.Fatal("error loading mapping config", err)
 	}
 
 	cfgm, err := cfgProducer.Compile() // converts configuration into a format that can be used by a protobuf producer
@@ -189,7 +182,7 @@ func main() {
 
 	flowProducer, err = protoproducer.CreateProtoProducer(cfgm, protoproducer.CreateSamplingSystem)
 	if err != nil {
-		log.Fatal("error producer", err)
+		log.Fatal("error creating producer", err)
 	}
 
 	// intercept panic and generate an error
@@ -200,17 +193,18 @@ func main() {
 	wg := &sync.WaitGroup{}
 
 	var collecting bool
+	// Note that goflow2 doesn't yet support a /templates endpoint. We probably should add that.
 	http.Handle("/metrics", promhttp.Handler())
 	http.HandleFunc("/__health", func(wr http.ResponseWriter, r *http.Request) {
 		if !collecting {
 			wr.WriteHeader(http.StatusServiceUnavailable)
 			if _, err := wr.Write([]byte("Not OK\n")); err != nil {
-				slog.Error("error writing HTTP", slog.String("error", err.Error()))
+				log.Error("error writing HTTP: ", err)
 			}
 		} else {
 			wr.WriteHeader(http.StatusOK)
 			if _, err := wr.Write([]byte("OK\n")); err != nil {
-				slog.Error("error writing HTTP", slog.String("error", err.Error()))
+				log.Error("error writing HTTP: ", err)
 
 			}
 		}
@@ -225,15 +219,13 @@ func main() {
 			defer wg.Done()
 			err := srv.ListenAndServe()
 			if err != nil && !errors.Is(err, http.ErrServerClosed) {
-				slog.Error("HTTP server error", slog.String("error", err.Error()))
-				os.Exit(1)
+				log.Fatal("HTTP server error", err.Error())
 			}
-			slog.Info("closed HTTP server")
+			log.Info("closed HTTP server")
 		}()
 	}
 
-	slog.Info("starting GoFlow2")
-
+	log.Info("Starting netflow2ng")
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
@@ -244,11 +236,10 @@ func main() {
 
 	Nfv9Ip, Nfv9Port := rctx.cli.ListenNf.Value()
 
-	// TODOL Sort of sockets, works, queue, and blocking
+	// Goflow2 UDPReceiver config allows for more complexity, we're just using one socket and however many
+	// workers were on the command-line.
 	numSockets := 1
-
-	numWorkers := numSockets * 2
-
+	numWorkers := rctx.cli.Workers
 	queueSize := 1000000
 
 	log.Info("starting collection")
@@ -262,7 +253,7 @@ func main() {
 	}
 	recv, err := utils.NewUDPReceiver(cfg)
 	if err != nil {
-		log.Error("error creating UDP receiver", slog.String("error", err.Error()))
+		log.Fatal("error creating UDP receiver", err.Error())
 		os.Exit(1)
 	}
 
@@ -348,45 +339,6 @@ func main() {
 	cancel()
 	close(q) // close errors
 	wg.Wait()
-
-	/*
-		var defaultTransport utils.Transport
-		defaultTransport = &utils.DefaultLogTransport{}
-
-		switch rctx.cli.LogFormat {
-		case "json":
-			log.SetFormatter(&logrus.JSONFormatter{})
-			defaultTransport = &utils.DefaultJSONTransport{}
-		case "default":
-			log.Debugf("Using default log style")
-		}
-
-		runtime.GOMAXPROCS(runtime.NumCPU())
-
-		log.Info("Starting netflow2ng")
-
-		s := &utils.StateNetFlow{
-			Transport: defaultTransport,
-			Logger:    log,
-		}
-
-		go httpServer(s, string(rctx.cli.Metrics))
-
-		if s.Transport, err = StartZmqProducer(); err != nil {
-			log.Fatal(err)
-		}
-
-		ip, port := rctx.cli.Listen.Value()
-
-		log.WithFields(logrus.Fields{
-			"Type": "NetFlow"}).
-			Infof("Listening on UDP %s", rctx.cli.Listen)
-
-		if err = s.FlowRoutine(rctx.cli.Workers, ip, port, rctx.cli.Reuse); err != nil {
-			log.Fatalf("Fatal error: could not listen to UDP (%v)", err)
-		}
-	*/
-
 }
 
 func PrintVersion() {
