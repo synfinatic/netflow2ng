@@ -1,4 +1,4 @@
-package main
+package formatter
 
 /*
  * Encapulate the TLV format accepted by ntop tools.
@@ -30,11 +30,10 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"reflect"
 
-	"github.com/cloudflare/goflow/v3/decoders/netflow"
+	"github.com/netsampler/goflow2/v2/decoders/netflow"
 )
 
 // Taken From ntop nDPI's ndpi_typedefs.h. We're only using a subset.
@@ -154,25 +153,19 @@ func SerializeTlvItem(item NdpiItem) ([]byte, error) {
 
 func SerializeTlvRecord(items []NdpiItem) ([]byte, error) {
 	var out bytes.Buffer
-	log.Tracef("Starting TLV serializing for flow.")
 	// ndpi_init_serializer_ll() in ndpi_serializer.c writes out 0x01 0x01 at the beginning of each TLV record.
 	out.WriteByte(0x01)
 	out.WriteByte(0x01)
 
 	for _, it := range items {
-		log.Tracef("Serializing item: %s[%d]=%v\n",
-			netflow.NFv9TypeToString(it.Key), it.Key, it.Value)
 		b, err := SerializeTlvItem(it)
 
 		if err != nil {
-			log.Errorf("Unable to serialize an item: %s", err.Error())
 			return nil, err
 		}
-		log.Tracef("Serialized item bytes\n%s", hex.Dump(b))
 		out.Write(b)
 	}
 	out.WriteByte(ndpi_serialization_end_of_record)
 
-	log.Tracef("Done with TLV serializing for flow.")
 	return out.Bytes(), nil
 }
