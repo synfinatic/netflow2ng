@@ -4,7 +4,6 @@ go 1.22
 
 require (
 	github.com/alecthomas/kong v1.2.1
-	github.com/golang/protobuf v1.5.4
 	github.com/netsampler/goflow2/v2 v2.2.3
 	github.com/pebbe/zmq4 v1.2.11
 	github.com/prometheus/client_golang v1.22.0

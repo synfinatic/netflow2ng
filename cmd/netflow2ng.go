@@ -17,6 +17,7 @@ import (
 
 	"github.com/alecthomas/kong"
 	localformatters "github.com/synfinatic/netflow2ng/formatter"
+	localtransport "github.com/synfinatic/netflow2ng/transport"
 	"gopkg.in/yaml.v3"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -139,15 +140,32 @@ func main() {
 	lvl, _ := logrus.ParseLevel(rctx.cli.LogLevel)
 	log.SetLevel(lvl)
 	localformatters.SetLogger(log)
-	// TODO: Shouldn't I be able to cast this directly? dunno why not...
+	localtransport.SetLogger(log)
 
-	formatter, err := format.FindFormat("ntopjson")
+	var msgType localtransport.MsgFormat
+	var formatter *format.Format
+
+	if rctx.cli.Protobuf {
+		msgType = localtransport.PBUF
+		log.Fatal("Protobuf not yet supported with goflow2")
+	} else if rctx.cli.TLV {
+		msgType = localtransport.TLV
+		formatter, err = format.FindFormat("ntoptlv")
+		log.Info("Using ntopng TLV format for ZMQ")
+	} else {
+		msgType = localtransport.JSON
+		formatter, err = format.FindFormat("ntopjson")
+		log.Info("Using ntopng JSON format for ZMQ")
+	}
+
 	if err != nil {
 		log.Error("Avail formatters:", format.GetFormats())
 		log.Fatal("error formatter", err)
 	}
 
-	transporter, err := transport.FindTransport("file")
+	localtransport.RegisterZmq(rctx.cli.ListenZmq, msgType, int(rctx.cli.SourceId), rctx.cli.Compress)
+
+	transporter, err := transport.FindTransport("zmq")
 	if err != nil {
 		log.Error("Avail transporters:", transport.GetTransports())
 		log.Fatal("error transporter", err)

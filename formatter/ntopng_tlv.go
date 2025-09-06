@@ -61,6 +61,7 @@ func toTLV(flowMessage *flowmessage.FlowMessage) ([]byte, error) {
 		NdpiItem{Key: netflow.NFV9_FIELD_IN_BYTES, Value: flowMessage.Bytes},
 		NdpiItem{Key: netflow.NFV9_FIELD_IN_PKTS, Value: flowMessage.Packets},
 	)
+	// TODO: Saw some odd values in ntopng for current flows. Looks like type overflow?
 	items = append(items,
 		NdpiItem{Key: netflow.NFV9_FIELD_FIRST_SWITCHED, Value: flowMessage.TimeFlowStartNs},
 		NdpiItem{Key: netflow.NFV9_FIELD_LAST_SWITCHED, Value: flowMessage.TimeFlowEndNs},
