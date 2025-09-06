@@ -56,8 +56,23 @@ clean-go:
 
 netflow2ng: $(OUTPUT_NAME)
 
-$(OUTPUT_NAME): prepare
+$(OUTPUT_NAME): prepare protobuf
 	go build -ldflags='$(LDFLAGS)' -o $(OUTPUT_NAME) ./cmd/...
+
+
+## Re-generate protobuf .pb.go. If you do this, be sure to edit the import path
+# in the resulting extended_flow.pb.go to add 'v2' to the go package path.
+# Ex: 'import pb "github.com/netsampler/goflow2/v2/pb
+GOFLOW2_MOD_PATH := $(shell go list -f '{{.Dir}}' -m github.com/netsampler/goflow2/v2)
+protobuf: proto/extended_flow.pb.go
+
+proto/extended_flow.pb.go: proto/extended_flow.proto
+	protoc --proto_path="$(GOFLOW2_MOD_PATH)" --proto_path=./proto --go_out=./proto \
+		--go_opt=paths=source_relative \
+		extended_flow.proto
+	@echo "Modifying import path in extended_flow.pb.go to add 'v2' to the go package path."
+	sed -i 's|pb "github.com/netsampler/goflow2/pb"|pb "github.com/netsampler/goflow2/v2/pb"|g' \
+			$@
 
 PHONY: docker-run
 docker-run:  ## Run docker container locally

@@ -36,8 +36,7 @@ import (
 	"reflect"
 
 	"github.com/netsampler/goflow2/v2/decoders/netflow"
-	flowmessage "github.com/netsampler/goflow2/v2/pb"
-	protoproducer "github.com/netsampler/goflow2/v2/producer/proto"
+	"github.com/synfinatic/netflow2ng/proto"
 )
 
 // Taken From ntop nDPI's ndpi_typedefs.h. We're only using a subset.
@@ -85,12 +84,12 @@ func (d *NtopngTlv) Format(data interface{}) ([]byte, []byte, error) {
 		key = dataIf.Key()
 	}
 
-	flowMsg, ok := data.(*protoproducer.ProtoProducerMessage)
-	if !ok {
-		return key, nil, errors.New("skipping non-ProtoProducerMessage")
+	extFlowMsg, err := castToExtendedFlowMsg(data)
+	if err != nil {
+		return key, nil, errors.New("skipping non-ExtendedFlowMessage")
 	}
 
-	tdata, err := toTLV(&flowMsg.FlowMessage)
+	tdata, err := d.toTLV(extFlowMsg)
 	if err != nil {
 		return key, nil, err
 	}
@@ -100,97 +99,101 @@ func (d *NtopngTlv) Format(data interface{}) ([]byte, []byte, error) {
 /*
  * Converts a FlowMessage to ntop's TLV format
  *
- * TODO: Figure out how to get remapped IN/OUT bytes/pkts here. This still uses
- * original Bytes/Packets fields, which are overwritten with FreeBSD NFv9 sensors.
+ * ExtendedFlowMessage is our protobuf message that contains the remapped IN/OUT fields
+ * using Formatter.MappingYamlStr
  */
-func toTLV(flowMessage *flowmessage.FlowMessage) ([]byte, error) {
+func (d *NtopngTlv) toTLV(extFlow *proto.ExtendedFlowMessage) ([]byte, error) {
 	ip6 := make(net.IP, net.IPv6len)
 	ip4 := make(net.IP, net.IPv4len)
 	hwaddr := make(net.HardwareAddr, 6)
 	_hwaddr := make([]byte, binary.MaxVarintLen64)
 	var icmp_type uint16
 	var items []ndpiItem
+	// goflow2 FlowMessage protobuf is embedded in ExtendedFlowMessage
+	baseFlow := extFlow.BaseFlow
 
 	// Stats + direction
 	// goflow2 only supports unidirectional flows. There is no Direction field and only one
 	// Bytes/Packets field. Data flow is always Src -> Dst
 	items = append(items,
 		ndpiItem{Key: netflow.NFV9_FIELD_DIRECTION, Value: 0},
-		ndpiItem{Key: netflow.NFV9_FIELD_IN_BYTES, Value: flowMessage.Bytes},
-		ndpiItem{Key: netflow.NFV9_FIELD_IN_PKTS, Value: flowMessage.Packets},
+		ndpiItem{Key: netflow.NFV9_FIELD_IN_BYTES, Value: extFlow.InBytes},
+		ndpiItem{Key: netflow.NFV9_FIELD_IN_PKTS, Value: extFlow.InPackets},
+		ndpiItem{Key: netflow.NFV9_FIELD_OUT_BYTES, Value: extFlow.OutBytes},
+		ndpiItem{Key: netflow.NFV9_FIELD_OUT_PKTS, Value: extFlow.OutPackets},
 	)
 	// Goflow2 protobuf provides time in ns, but it ntopng expects time in seconds.
 	items = append(items,
 		ndpiItem{Key: netflow.NFV9_FIELD_FIRST_SWITCHED,
-			Value: uint32(flowMessage.TimeFlowStartNs / 1_000_000_000)},
+			Value: uint32(baseFlow.TimeFlowStartNs / 1_000_000_000)},
 		ndpiItem{Key: netflow.NFV9_FIELD_LAST_SWITCHED,
-			Value: uint32(flowMessage.TimeFlowEndNs / 1_000_000_000)},
+			Value: uint32(baseFlow.TimeFlowEndNs / 1_000_000_000)},
 	)
 
 	items = append(items,
 		// L4
-		ndpiItem{Key: netflow.NFV9_FIELD_PROTOCOL, Value: flowMessage.Proto},
-		ndpiItem{Key: netflow.NFV9_FIELD_L4_SRC_PORT, Value: flowMessage.SrcPort},
-		ndpiItem{Key: netflow.NFV9_FIELD_L4_DST_PORT, Value: flowMessage.DstPort},
+		ndpiItem{Key: netflow.NFV9_FIELD_PROTOCOL, Value: baseFlow.Proto},
+		ndpiItem{Key: netflow.NFV9_FIELD_L4_SRC_PORT, Value: baseFlow.SrcPort},
+		ndpiItem{Key: netflow.NFV9_FIELD_L4_DST_PORT, Value: baseFlow.DstPort},
 		// Network
-		ndpiItem{Key: netflow.NFV9_FIELD_SRC_AS, Value: flowMessage.SrcAs},
-		ndpiItem{Key: netflow.NFV9_FIELD_DST_AS, Value: flowMessage.DstAs},
+		ndpiItem{Key: netflow.NFV9_FIELD_SRC_AS, Value: baseFlow.SrcAs},
+		ndpiItem{Key: netflow.NFV9_FIELD_DST_AS, Value: baseFlow.DstAs},
 
 		// Interfaces
-		ndpiItem{Key: netflow.NFV9_FIELD_INPUT_SNMP, Value: flowMessage.InIf},
-		ndpiItem{Key: netflow.NFV9_FIELD_OUTPUT_SNMP, Value: flowMessage.OutIf},
-		ndpiItem{Key: netflow.NFV9_FIELD_FORWARDING_STATUS, Value: flowMessage.ForwardingStatus},
-		ndpiItem{Key: netflow.NFV9_FIELD_SRC_TOS, Value: flowMessage.IpTos},
-		ndpiItem{Key: netflow.NFV9_FIELD_TCP_FLAGS, Value: flowMessage.TcpFlags},
-		ndpiItem{Key: netflow.NFV9_FIELD_MIN_TTL, Value: flowMessage.IpTtl},
+		ndpiItem{Key: netflow.NFV9_FIELD_INPUT_SNMP, Value: baseFlow.InIf},
+		ndpiItem{Key: netflow.NFV9_FIELD_OUTPUT_SNMP, Value: baseFlow.OutIf},
+		ndpiItem{Key: netflow.NFV9_FIELD_FORWARDING_STATUS, Value: baseFlow.ForwardingStatus},
+		ndpiItem{Key: netflow.NFV9_FIELD_SRC_TOS, Value: baseFlow.IpTos},
+		ndpiItem{Key: netflow.NFV9_FIELD_TCP_FLAGS, Value: baseFlow.TcpFlags},
+		ndpiItem{Key: netflow.NFV9_FIELD_MIN_TTL, Value: baseFlow.IpTtl},
 	)
 
 	// IP
-	if flowMessage.Etype == 0x800 {
+	if baseFlow.Etype == 0x800 {
 		// IPv4
 		items = append(items,
 			ndpiItem{Key: netflow.NFV9_FIELD_IP_PROTOCOL_VERSION, Value: 4},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV4_SRC_PREFIX, Value: flowMessage.SrcNet},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV4_DST_PREFIX, Value: flowMessage.DstNet},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV4_IDENT, Value: flowMessage.FragmentId},
-			ndpiItem{Key: netflow.NFV9_FIELD_FRAGMENT_OFFSET, Value: flowMessage.FragmentOffset},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_SRC_MASK, Value: flowMessage.SrcNet},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_DST_MASK, Value: flowMessage.DstNet},
+			ndpiItem{Key: netflow.NFV9_FIELD_IPV4_SRC_PREFIX, Value: baseFlow.SrcNet},
+			ndpiItem{Key: netflow.NFV9_FIELD_IPV4_DST_PREFIX, Value: baseFlow.DstNet},
+			ndpiItem{Key: netflow.NFV9_FIELD_IPV4_IDENT, Value: baseFlow.FragmentId},
+			ndpiItem{Key: netflow.NFV9_FIELD_FRAGMENT_OFFSET, Value: baseFlow.FragmentOffset},
+			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_SRC_MASK, Value: baseFlow.SrcNet},
+			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_DST_MASK, Value: baseFlow.DstNet},
 		)
-		copy(ip4, flowMessage.SrcAddr)
+		copy(ip4, baseFlow.SrcAddr)
 		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV4_SRC_ADDR, Value: ip4.String()})
-		copy(ip4, flowMessage.DstAddr)
+		copy(ip4, baseFlow.DstAddr)
 		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV4_DST_ADDR, Value: ip4.String()})
-		copy(ip4, flowMessage.NextHop)
+		copy(ip4, baseFlow.NextHop)
 		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV4_NEXT_HOP, Value: ip4.String()})
 
 	} else {
 		// 0x86dd IPv6
 		items = append(items,
 			ndpiItem{Key: netflow.NFV9_FIELD_IP_PROTOCOL_VERSION, Value: 6},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_SRC_MASK, Value: flowMessage.SrcNet},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_DST_MASK, Value: flowMessage.DstNet},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_FLOW_LABEL, Value: flowMessage.Ipv6FlowLabel},
+			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_SRC_MASK, Value: baseFlow.SrcNet},
+			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_DST_MASK, Value: baseFlow.DstNet},
+			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_FLOW_LABEL, Value: baseFlow.Ipv6FlowLabel},
 		)
-		copy(ip6, flowMessage.SrcAddr)
+		copy(ip6, baseFlow.SrcAddr)
 		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV6_SRC_ADDR, Value: ip6.String()})
-		copy(ip6, flowMessage.DstAddr)
+		copy(ip6, baseFlow.DstAddr)
 		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV6_DST_ADDR, Value: ip6.String()})
-		copy(ip6, flowMessage.NextHop)
+		copy(ip6, baseFlow.NextHop)
 		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV6_NEXT_HOP, Value: ip6.String()})
 	}
 
 	// ICMP
-	icmp_type = uint16((uint16(flowMessage.IcmpType) << 8) + uint16(flowMessage.IcmpCode))
+	icmp_type = uint16((uint16(baseFlow.IcmpType) << 8) + uint16(baseFlow.IcmpCode))
 	items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_ICMP_TYPE, Value: icmp_type})
 
 	// MAC
-	binary.PutUvarint(_hwaddr, flowMessage.DstMac)
+	binary.PutUvarint(_hwaddr, baseFlow.DstMac)
 	for i := 0; i < 6; i++ {
 		hwaddr[i] = _hwaddr[i]
 	}
 	items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IN_DST_MAC, Value: hwaddr.String()})
-	binary.PutUvarint(_hwaddr, flowMessage.SrcMac)
+	binary.PutUvarint(_hwaddr, baseFlow.SrcMac)
 	for i := 0; i < 6; i++ {
 		hwaddr[i] = _hwaddr[i]
 	}
@@ -198,16 +201,16 @@ func toTLV(flowMessage *flowmessage.FlowMessage) ([]byte, error) {
 
 	// VLAN
 	items = append(items,
-		ndpiItem{Key: netflow.NFV9_FIELD_SRC_VLAN, Value: flowMessage.SrcVlan},
-		ndpiItem{Key: netflow.NFV9_FIELD_DST_VLAN, Value: flowMessage.DstVlan},
+		ndpiItem{Key: netflow.NFV9_FIELD_SRC_VLAN, Value: baseFlow.SrcVlan},
+		ndpiItem{Key: netflow.NFV9_FIELD_DST_VLAN, Value: baseFlow.DstVlan},
 	)
 
 	// Flow Exporter IP
-	if len(flowMessage.SamplerAddress) == 4 {
-		copy(ip4, flowMessage.SamplerAddress)
+	if len(baseFlow.SamplerAddress) == 4 {
+		copy(ip4, baseFlow.SamplerAddress)
 		items = append(items, ndpiItem{Key: netflow.IPFIX_FIELD_exporterIPv4Address, Value: ip4.String()})
-	} else if len(flowMessage.SamplerAddress) == 16 {
-		copy(ip6, flowMessage.SamplerAddress)
+	} else if len(baseFlow.SamplerAddress) == 16 {
+		copy(ip6, baseFlow.SamplerAddress)
 		items = append(items, ndpiItem{Key: netflow.IPFIX_FIELD_exporterIPv6Address, Value: ip6.String()})
 	}
 
