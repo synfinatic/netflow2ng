@@ -16,32 +16,6 @@ const (
 // and OUT_BYTES/PKTS into custom fields in the protobuf message so that are not lost.
 var MappingYamlStr = `
 formatter:
-  fields: # list of fields to format in JSON
-    - type
-    - time_received_ns
-    - sequence_num
-    - sampling_rate
-    - sampler_address
-    - time_flow_start_ns
-    - time_flow_end_ns
-    - bytes
-    - packets
-    - in_bytes
-    - in_packets
-    - out_bytes
-    - out_packets
-    - src_addr
-    - src_net
-    - dst_addr
-    - dst_net
-    - etype
-    - proto
-    - src_port
-    - dst_port
-    - in_if
-    - out_if
-    - src_mac
-    - dst_mac
   key:
     - sampler_address
   protobuf: # manual protobuf fields addition

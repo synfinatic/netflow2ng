@@ -44,8 +44,8 @@ func (d *NtopngJson) Format(data interface{}) ([]byte, []byte, error) {
 /*
  * Converts a FlowMessage to JSON for ntopng
  *
- * TODO: Figure out how to get remapped IN/OUT bytes/pkts here. This still usesoriginal Bytes/Packets
- * fields, which are overwritten with FreeBSD NFv9 sensors.
+ * TODO: Figure out how to get remapped IN/OUT bytes/pkts here. This still uses original
+ * Bytes/Packets fields, which are overwritten with FreeBSD NFv9 sensors.
  */
 func toJSON(ppMsg *protoproducer.ProtoProducerMessage) ([]byte, error) {
 	ip6 := make(net.IP, net.IPv6len)
