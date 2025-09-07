@@ -55,16 +55,19 @@ func toTLV(flowMessage *flowmessage.FlowMessage) ([]byte, error) {
 	var items []NdpiItem
 
 	// Stats + direction
-	// goflow2 only supports unidirectional flows. Therw is no Direction field and only one
+	// goflow2 only supports unidirectional flows. There is no Direction field and only one
 	// Bytes/Packets field. Data flow is always Src -> Dst
 	items = append(items,
+		NdpiItem{Key: netflow.NFV9_FIELD_DIRECTION, Value: 0},
 		NdpiItem{Key: netflow.NFV9_FIELD_IN_BYTES, Value: flowMessage.Bytes},
 		NdpiItem{Key: netflow.NFV9_FIELD_IN_PKTS, Value: flowMessage.Packets},
 	)
-	// TODO: Saw some odd values in ntopng for current flows. Looks like type overflow?
+	// Goflow2 protobuf provides time in ns, but it ntopng expects time in seconds.
 	items = append(items,
-		NdpiItem{Key: netflow.NFV9_FIELD_FIRST_SWITCHED, Value: flowMessage.TimeFlowStartNs},
-		NdpiItem{Key: netflow.NFV9_FIELD_LAST_SWITCHED, Value: flowMessage.TimeFlowEndNs},
+		NdpiItem{Key: netflow.NFV9_FIELD_FIRST_SWITCHED,
+			Value: uint32(flowMessage.TimeFlowStartNs / 1_000_000_000)},
+		NdpiItem{Key: netflow.NFV9_FIELD_LAST_SWITCHED,
+			Value: uint32(flowMessage.TimeFlowEndNs / 1_000_000_000)},
 	)
 
 	items = append(items,

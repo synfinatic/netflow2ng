@@ -58,11 +58,15 @@ func toJSON(ppMsg *protoproducer.ProtoProducerMessage) ([]byte, error) {
 	// Stats + direction
 	// goflow2 only supports unidirectional flows. There is no Direction field and only one
 	// Bytes/Packets field. Data flow is always Src -> Dst.
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_DIRECTION)] = 0
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_IN_BYTES)] = ppMsg.Bytes
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_IN_PKTS)] = ppMsg.Packets
 
-	retmap[strconv.Itoa(netflow.NFV9_FIELD_FIRST_SWITCHED)] = ppMsg.TimeFlowStartNs
-	retmap[strconv.Itoa(netflow.NFV9_FIELD_LAST_SWITCHED)] = ppMsg.TimeFlowEndNs
+	// Goflow2 protobuf provides time in ns, but it ntopng expects time in seconds.
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_FIRST_SWITCHED)] =
+		uint32(ppMsg.TimeFlowStartNs / 1_000_000_000)
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_LAST_SWITCHED)] =
+		uint32(ppMsg.TimeFlowEndNs / 1_000_000_000)
 
 	// L4
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_PROTOCOL)] = ppMsg.Proto

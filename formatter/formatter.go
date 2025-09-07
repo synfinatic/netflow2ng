@@ -69,7 +69,8 @@ netflowv9:
     - field: 24
       destination: out_packets
 `
-var log *logrus.Logger
+
+var log *logrus.Logger //nolint:unused
 
 func SetLogger(l *logrus.Logger) {
 	log = l
@@ -78,6 +79,4 @@ func SetLogger(l *logrus.Logger) {
 func init() {
 	format.RegisterFormatDriver("ntopjson", &NtopngJson{})
 	format.RegisterFormatDriver("ntoptlv", &NtopngTlv{})
-
-	log.Debug("formatter package initialized")
 }
