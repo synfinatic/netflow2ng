@@ -328,8 +328,8 @@ func main() {
 	}
 	// close producer
 	flowProducer.Close()
-	// close transporter (eg: flushes message to Kafka)
-	transporter.Close()
+	// close transporter (eg: flushes message to Kafka) ignore errors, we're exiting anyway
+	_ = transporter.Close()
 	log.Info("transporter closed")
 	// close http server (prometheus + health check)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)

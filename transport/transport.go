@@ -1,6 +1,8 @@
 package transport
 
 import (
+	"sync"
+
 	"github.com/netsampler/goflow2/v2/transport"
 	"github.com/sirupsen/logrus"
 )
@@ -17,7 +19,7 @@ func RegisterZmq(zmqListen string, msgType MsgFormat, sourceId int, compress boo
 		sourceId:      sourceId,
 		msgType:       msgType,
 		compress:      compress,
+		lock:          &sync.RWMutex{},
 	}
-
 	transport.RegisterTransportDriver("zmq", z)
 }

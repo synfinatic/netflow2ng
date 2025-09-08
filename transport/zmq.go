@@ -15,6 +15,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"sync"
 	"time"
 
 	zmq "github.com/pebbe/zmq4"
@@ -44,6 +45,7 @@ type ZmqDriver struct {
 	sourceId      int
 	msgType       MsgFormat
 	compress      bool
+	lock          *sync.RWMutex
 }
 
 type zmqHeader struct {
@@ -63,9 +65,11 @@ func (d *ZmqDriver) Prepare() error {
 }
 
 func (d *ZmqDriver) Init() error {
+	d.lock.Lock()
 	d.context, _ = zmq.NewContext()
 	d.publisher, _ = d.context.NewSocket(zmq.PUB)
 	if err := d.publisher.Bind(d.listenAddress); err != nil {
+		d.lock.Unlock()
 		log.Fatalf("Unable to bind: %s", err.Error())
 	}
 
@@ -73,6 +77,7 @@ func (d *ZmqDriver) Init() error {
 
 	//  Ensure subscriber connection has time to complete
 	time.Sleep(time.Second)
+	d.lock.Unlock()
 	return nil
 }
 
@@ -80,7 +85,6 @@ func (d *ZmqDriver) Send(key, data []byte) error {
 	var err error
 
 	msg_len := uint16(len(data))
-
 	header := d.newZmqHeader(msg_len)
 
 	// send our header with the topic first as a multi-part message
@@ -89,32 +93,41 @@ func (d *ZmqDriver) Send(key, data []byte) error {
 		log.Errorf("Unable to serialize header: %s", err.Error())
 		return err
 	}
+
+	d.lock.Lock()
 	bytes, err := d.publisher.SendBytes(hbytes, zmq.SNDMORE)
 	if err != nil {
 		log.Errorf("Unable to send header: %s", err.Error())
+		d.lock.Unlock()
 		return err
 	}
 	if bytes != len(hbytes) {
 		log.Errorf("Wrote the wrong number of header bytes: %d", bytes)
+		d.lock.Unlock()
 		return err
 	}
 
 	// now send the actual payload
 	if _, err = d.publisher.SendBytes(data, 0); err != nil {
 		log.Error(err)
+		d.lock.Unlock()
 		return err
 	}
+	d.lock.Unlock()
 
-	if d.msgType == PBUF {
+	switch d.msgType {
+	case PBUF:
 		log.Debugf("sent %d bytes of pbuf:\n%s", msg_len, hex.Dump(data))
-	} else if d.msgType == JSON {
+	case JSON:
 		if d.compress {
 			log.Debugf("sent %d bytes of zlib json:\n%s", msg_len, hex.Dump(data))
 		} else {
 			log.Debugf("sent %d bytes of json: %s", msg_len, string(data))
 		}
-	} else {
+	case TLV:
 		log.Debugf("sent %d bytes of ntop tlv:\n%s", msg_len, hex.Dump(data))
+	default:
+		log.Errorf("sent %d bytes of unknown message type %d", msg_len, d.msgType)
 	}
 
 	return err
