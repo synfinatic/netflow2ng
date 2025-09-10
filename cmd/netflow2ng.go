@@ -73,8 +73,8 @@ func (a *Address) Value() (string, int) {
 }
 
 type CLI struct {
-	ListenNf Address `kong:"short='a',help='NetFlow/IPFIX listen address:port',default='0.0.0.0:2055'"`
-	Reuse    bool    `kong:"help='Enable SO_REUSEPORT for NetFlow/IPFIX listen port'"`
+	Listen Address `kong:"short='a',help='NetFlow/IPFIX listen address:port',default='0.0.0.0:2055'"`
+	Reuse  bool    `kong:"help='Enable SO_REUSEPORT for NetFlow/IPFIX listen port'"`
 
 	Metrics Address `kong:"short='m',help='Metrics listen address',default='0.0.0.0:8080'"`
 
@@ -93,7 +93,7 @@ type CLI struct {
 
 func LoadMappingYaml() (*protoproducer.ProducerConfig, error) {
 	config := &protoproducer.ProducerConfig{}
-	dec := yaml.NewDecoder(strings.NewReader(localformatters.MappingYamlStr))
+	dec := yaml.NewDecoder(strings.NewReader(localformatters.MappingYaml))
 	err := dec.Decode(config)
 	return config, err
 }
@@ -234,7 +234,7 @@ func main() {
 
 	q := make(chan bool)
 
-	Nfv9Ip, Nfv9Port := rctx.cli.ListenNf.Value()
+	Nfv9Ip, Nfv9Port := rctx.cli.Listen.Value()
 
 	// Goflow2 UDPReceiver config allows for more complexity, we're just using one socket and however many
 	// workers were on the command-line.
