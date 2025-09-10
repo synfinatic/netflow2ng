@@ -11,8 +11,8 @@ ntopng is a free/commercial NetFlow/sFlow analysis console suitible for a
 variety of use cases.  However, if you want to collect NetFlow or sFlow
 data and load that into ntopng you currently have no choice but to spend
 199Euro on [nProbe](https://www.ntop.org/products/netflow/nprobe/) which
-in my case is more expensive than the 
-[Ubiquiti USG](https://www.ui.com/unifi-routing/usg/) that I wanted to 
+in my case is more expensive than the
+[Ubiquiti USG](https://www.ui.com/unifi-routing/usg/) that I wanted to
 collect NetFlow stats from.
 
 Hence, I created netflow2ng.
@@ -34,7 +34,7 @@ Hence, I created netflow2ng.
  1. Use the optional [docker-compose.yaml](docker-compose.yaml) file
 
 ### Configuration
- 
+
  1. For a list of configuration arguments, run `netflow2ng -h`  Note from  `ntopng` v6.4 onwards you must use `--tlv`.
  1. Configure your network device(s) to send NetFlow stats to netflow2ng
  1. Configure your [ntopng](https://www.ntop.org/products/traffic-analysis/ntop/)
@@ -46,7 +46,6 @@ Hence, I created netflow2ng.
  * Collect NetFlow v9 stats from one or more probes
  * Run a ZMQ Publisher for ntopng to collect metrics from
  * Prometheus metrics
- * NetFlow Templates
 
 ### Ports
 
@@ -58,7 +57,7 @@ By default, netflow2ng listens on all addresses on the following ports. This can
 ### NetFlow v9 Support
 
 netflow2ng utilizes [goflow](https://github.com/cloudflare/goflow) for NetFlow
-decoding.  For more information on what NetFlow fields are supported in 
+decoding.  For more information on what NetFlow fields are supported in
 netflow2ng, please read the goflow docs.
 
 ### sFlow/IPFIX/etc support?
