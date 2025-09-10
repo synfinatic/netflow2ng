@@ -56,7 +56,7 @@ By default, netflow2ng listens on all addresses on the following ports. This can
 
 ### NetFlow v9 Support
 
-netflow2ng utilizes [goflow](https://github.com/cloudflare/goflow) for NetFlow
+netflow2ng utilizes [goflow2](https://github.com/netsampler/goflow2) for NetFlow
 decoding.  For more information on what NetFlow fields are supported in
 netflow2ng, please read the goflow docs.
 
