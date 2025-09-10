@@ -407,11 +407,12 @@ func (zs *ZmqState) SendZmqMessage(flowMessage *flowmessage.FlowMessage) {
 	var msg []byte
 	var err error
 
-	if zs.serialize == "pbuf" {
+	switch zs.serialize {
+	case "pbuf":
 		msg, err = proto.Marshal(flowMessage)
-	} else if zs.serialize == "json" {
+	case "json":
 		msg, err = zs.toJSON(flowMessage)
-	} else {
+	default:
 		msg, err = zs.toTLV(flowMessage)
 	}
 
@@ -446,15 +447,16 @@ func (zs *ZmqState) SendZmqMessage(flowMessage *flowmessage.FlowMessage) {
 		return
 	}
 
-	if zs.serialize == "pbuf" {
+	switch zs.serialize {
+	case "pbuf":
 		log.Debugf("sent %d bytes of pbuf:\n%s", msg_len, hex.Dump(msg))
-	} else if zs.serialize == "json" {
+	case "json":
 		if zs.compress {
 			log.Debugf("sent %d bytes of zlib json:\n%s", msg_len, hex.Dump(msg))
 		} else {
 			log.Debugf("sent %d bytes of json: %s", msg_len, string(msg))
 		}
-	} else {
+	default:
 		log.Debugf("sent %d bytes of ntop tlv:\n%s", msg_len, hex.Dump(msg))
 	}
 }

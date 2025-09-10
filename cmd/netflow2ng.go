@@ -34,7 +34,7 @@ type SourceId int
 
 func (s *SourceId) Validate() error {
 	if *s < 0 || *s > 255 {
-		return fmt.Errorf("Must be betweeen 0 and 255")
+		return fmt.Errorf("must be betweeen 0 and 255")
 	}
 	return nil
 }
