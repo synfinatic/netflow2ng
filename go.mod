@@ -5,7 +5,7 @@ go 1.23.0
 require (
 	github.com/alecthomas/kong v1.2.1
 	github.com/netsampler/goflow2/v2 v2.2.3
-	github.com/pebbe/zmq4 v1.2.11
+	github.com/pebbe/zmq4 v1.4.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/sirupsen/logrus v1.9.3
 	google.golang.org/protobuf v1.36.8

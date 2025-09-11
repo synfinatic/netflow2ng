@@ -29,8 +29,8 @@ github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
 github.com/netsampler/goflow2/v2 v2.2.3 h1:uItOl69jDHuNJR+LGZ1JFs4/9qzBgbm95SP0QTMzGwo=
 github.com/netsampler/goflow2/v2 v2.2.3/go.mod h1:qC4yiY8Rw7SEwrpPy+w2ktnXc403Vilt2ZyBEYE5iJQ=
-github.com/pebbe/zmq4 v1.2.11 h1:Ua5mgIaZeabUGnH7tqswkUcjkL7JYGai5e8v4hpEU9Q=
-github.com/pebbe/zmq4 v1.2.11/go.mod h1:nqnPueOapVhE2wItZ0uOErngczsJdLOGkebMxaO8r48=
+github.com/pebbe/zmq4 v1.4.0 h1:gO5P92Ayl8GXpPZdYcD62Cwbq0slSBVVQRIXwGSJ6eQ=
+github.com/pebbe/zmq4 v1.4.0/go.mod h1:nqnPueOapVhE2wItZ0uOErngczsJdLOGkebMxaO8r48=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/prometheus/client_golang v1.23.2 h1:Je96obch5RDVy3FDMndoUsjAhG5Edi49h0RJWRi/o0o=
