@@ -138,7 +138,7 @@ prepare:
 
 .PHONY: package
 package:  ## Build .deb and .rpm packages
-	docker-compose -f docker-compose-pkg.yml up
+	docker compose -f docker-compose-pkg.yml up
 
 # These targets aren't for you.
 .PHONY: .package-deb
@@ -161,7 +161,7 @@ package:  ## Build .deb and .rpm packages
         --url "$(URL)" \
         --architecture $(ARCH) \
         --license "$(LICENSE) "\
-	--depends "zeromq" \
+		--depends "zeromq" \
         --package $(DIST_DIR) \
         $(OUTPUT_NAME)=/usr/bin/netflow2ng \
         package/netflow2ng.service=/lib/systemd/system/netflow2ng.service \
