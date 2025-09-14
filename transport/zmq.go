@@ -12,9 +12,11 @@ package transport
 
 import (
 	"bytes"
+	"compress/zlib"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -26,9 +28,11 @@ import (
  * include/ntop_typedefs.h, include/ntop_defines.h & src/ZMQCollectorInterface.cpp from
  * https://github.com/ntop/ntopng
  */
-const ZMQ_MSG_VERSION_OLD = 2 // ntopng message version 2 for ntopng less than v6.4
-const ZMQ_MSG_VERSION_TLV = 3 // ntop message version for TLV for ntopng v6.4 and later.
-const ZMQ_TOPIC = "flow"      // ntopng only really cares about the first character!
+const ZMQ_MSG_VERSION_4 = 4 // ntop message version for zmq_msg_hdr_v3 in ntop_defines.h
+const ZMQ_TOPIC = "flow"    // ntopng only really cares about the first character!
+
+const ZMQ_MSG_V4_FLAG_TLV = 2
+const ZMQ_MSG_V4_FLAG_COMPRESSED = 4
 
 const (
 	PBUF MsgFormat = iota
@@ -48,15 +52,19 @@ type ZmqDriver struct {
 	lock          *sync.RWMutex
 }
 
-type zmqHeader struct {
-	url       string
-	version   uint8
-	source_id uint8
-	length    uint16
-	msg_id    uint32
+// This is the latest header as of ntopng 6.4
+type zmqHeaderV3 struct {
+	url               string // must be 16 bytes long
+	version           uint8  // use only with ZMQ_MSG_VERSION_4
+	flags             uint8
+	uncompressed_size uint32
+	compressed_size   uint32
+	msg_id            uint32
+	source_id         uint32
 }
 
-var messageId uint32 = 1 // Every ZMQ message we send should have a uniq ID
+var messageId uint32 = 0                         // Every ZMQ message we send should have a uniq ID
+const maxMessageId uint32 = math.MaxUint32 - 100 // Wrap around before we hit max uint32
 
 func (d *ZmqDriver) Prepare() error {
 	// Ideally the code in transport.RegisterZmq would be in here, but I don't
@@ -82,18 +90,37 @@ func (d *ZmqDriver) Init() error {
 
 func (d *ZmqDriver) Send(key, data []byte) error {
 	var err error
+	orig_len := uint32(len(data))
+	compressed_len := orig_len
+
+	// Should only compress JSON
+	if d.msgType == JSON && d.compress {
+		var zbuf bytes.Buffer
+		z := zlib.NewWriter(&zbuf)
+		if _, err = z.Write(data); err != nil {
+			return err
+		}
+		if err = z.Close(); err != nil {
+			return err
+		}
+		// replace data with zlib compressed buffer
+		data = zbuf.Bytes()
+		compressed_len = uint32(len(data))
+	}
+
+	// Lock before accessing messageId or zmq header to ensure messageId is unique
+	d.lock.Lock()
+	defer d.lock.Unlock()
 
 	if messageId == 1 {
 		log.Info("Sending first ZMQ message.")
 	} else if messageId%1000 == 0 {
 		log.Debugf("Sending ZMQ message id %d.", messageId)
+	} else if messageId >= maxMessageId {
+		log.Debug("Wrapping message id back to 1 to avoid overflow")
+		messageId = 1
 	}
-
-	msg_len := uint16(len(data))
-	// Lock before creating zmq header to ensure messageId is unique
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	header := d.newZmqHeader(msg_len)
+	header := d.newZmqHeaderV3(orig_len, compressed_len)
 
 	// send our header with the topic first as a multi-part message
 	hbytes, err := header.bytes()
@@ -120,17 +147,17 @@ func (d *ZmqDriver) Send(key, data []byte) error {
 
 	switch d.msgType {
 	case PBUF:
-		log.Tracef("Sent %d bytes of pbuf:\n%s", msg_len, hex.Dump(data))
+		log.Tracef("Sent %d bytes of pbuf:\n%s", orig_len, hex.Dump(data))
 	case JSON:
 		if d.compress {
-			log.Tracef("Sent %d bytes of zlib json:\n%s", msg_len, hex.Dump(data))
+			log.Tracef("Sent %d bytes of zlib json:\n%s", compressed_len, hex.Dump(data))
 		} else {
-			log.Tracef("Sent %d bytes of json: %s", msg_len, string(data))
+			log.Tracef("Sent %d bytes of json: %s", orig_len, string(data))
 		}
 	case TLV:
-		log.Tracef("Sent %d bytes of ntop tlv:\n%s", msg_len, hex.Dump(data))
+		log.Tracef("Sent %d bytes of ntop tlv:\n%s", orig_len, hex.Dump(data))
 	default:
-		log.Errorf("Sent %d bytes of unknown message type %d", msg_len, d.msgType)
+		log.Errorf("Sent %d bytes of unknown message type %d", orig_len, d.msgType)
 	}
 
 	return err
@@ -141,25 +168,30 @@ func (d *ZmqDriver) Close() error {
 	return nil
 }
 
-func (d *ZmqDriver) newZmqHeader(length uint16) *zmqHeader {
-	var version uint8 = ZMQ_MSG_VERSION_TLV
-	if d.msgType != TLV {
-		version = ZMQ_MSG_VERSION_OLD
+func (d *ZmqDriver) newZmqHeaderV3(orig_length uint32, compressed_len uint32) *zmqHeaderV3 {
+	var flags uint8 = 0
+	if d.msgType == TLV {
+		flags |= ZMQ_MSG_V4_FLAG_TLV
 	}
-	z := &zmqHeader{
-		url:       ZMQ_TOPIC,
-		version:   version,
-		source_id: uint8(d.sourceId),
-		length:    length,
-		msg_id:    messageId,
+	if d.compress {
+		flags |= ZMQ_MSG_V4_FLAG_COMPRESSED
+	}
+
+	z := &zmqHeaderV3{
+		url:               ZMQ_TOPIC,
+		version:           ZMQ_MSG_VERSION_4,
+		flags:             flags,
+		uncompressed_size: orig_length,
+		compressed_size:   compressed_len,
+		msg_id:            messageId,
+		source_id:         uint32(d.sourceId),
 	}
 	messageId++
 
 	return z
 }
 
-// Serialize our zmqHeader into a byte array
-func (zh *zmqHeader) bytes() ([]byte, error) {
+func (zh *zmqHeaderV3) bytes() ([]byte, error) {
 	header := []byte{}
 	bBuf := bytes.NewBuffer(header)
 
@@ -186,18 +218,35 @@ func (zh *zmqHeader) bytes() ([]byte, error) {
 		return nil, fmt.Errorf("URL was %d bytes instead of 16", i)
 	}
 
-	if _, err = bBuf.Write([]byte{zh.version, zh.source_id}); err != nil {
+	if _, err = bBuf.Write([]byte{zh.version, zh.flags}); err != nil {
+		return nil, err
+	}
+	// Need two bytes of padding to align next uint32 on 4-byte boundary
+	if _, err = bBuf.Write([]byte{0, 0}); err != nil {
 		return nil, err
 	}
 
-	be16Buf := make([]byte, 2)
-	binary.BigEndian.PutUint16(be16Buf, zh.length)
-	if _, err = bBuf.Write(be16Buf); err != nil {
+	// Both uncompressed_size and compressed_size need to be in little-endian
+	le32Buf := make([]byte, 4)
+	binary.LittleEndian.PutUint32(le32Buf, zh.uncompressed_size)
+	if _, err = bBuf.Write(le32Buf); err != nil {
+		return nil, err
+	}
+
+	le32Buf = make([]byte, 4)
+	binary.LittleEndian.PutUint32(le32Buf, zh.compressed_size)
+	if _, err = bBuf.Write(le32Buf); err != nil {
 		return nil, err
 	}
 
 	be32Buf := make([]byte, 4)
 	binary.BigEndian.PutUint32(be32Buf, zh.msg_id)
+	if _, err = bBuf.Write(be32Buf); err != nil {
+		return nil, err
+	}
+
+	be32Buf = make([]byte, 4)
+	binary.BigEndian.PutUint32(be32Buf, zh.source_id)
 	if _, err = bBuf.Write(be32Buf); err != nil {
 		return nil, err
 	}
