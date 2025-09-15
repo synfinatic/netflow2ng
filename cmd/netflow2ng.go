@@ -221,11 +221,10 @@ func main() {
 			if err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Fatal("HTTP server error", err.Error())
 			}
-			log.Info("closed HTTP server")
+			log.Info("Closed HTTP server")
 		}()
 	}
 
-	log.Info("Starting netflow2ng")
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
@@ -242,7 +241,7 @@ func main() {
 	numWorkers := rctx.cli.Workers
 	queueSize := 1000000
 
-	log.Info("starting collection")
+	log.Info("Starting collection. It may take several minutes for the first flows to appear in ntopng.")
 
 	cfg := &utils.UDPReceiverConfig{
 		Sockets:          numSockets,
@@ -253,7 +252,7 @@ func main() {
 	}
 	recv, err := utils.NewUDPReceiver(cfg)
 	if err != nil {
-		log.Fatal("error creating UDP receiver", err.Error())
+		log.Fatal("Error creating UDP receiver", err.Error())
 		os.Exit(1)
 	}
 
@@ -277,7 +276,7 @@ func main() {
 	// starts receivers
 	// the function either returns an error
 	if err := recv.Start(Nfv9Ip, Nfv9Port, decodeFunc); err != nil {
-		log.Fatal("error starting netflow reciever: ", Nfv9Ip, Nfv9Port)
+		log.Fatal("Error starting netflow receiver: ", Nfv9Ip, Nfv9Port)
 	} else {
 		wg.Add(1)
 		go func() {
@@ -289,17 +288,17 @@ func main() {
 					return
 				case err := <-recv.Errors():
 					if errors.Is(err, net.ErrClosed) {
-						log.Info("closed receiver")
+						log.Info("Closed receiver")
 						continue
 					} else if !errors.Is(err, netflow.ErrorTemplateNotFound) && !errors.Is(err, debug.PanicError) {
-						log.Error("error", err)
+						log.Error("Error", err)
 						continue
 					} else {
 						if errors.Is(err, netflow.ErrorTemplateNotFound) {
-							log.Info("template error: ", err)
+							log.Debug("Netflow packet received before template was set. Discarding")
 						} else if errors.Is(err, debug.PanicError) {
 							var pErrMsg *debug.PanicErrorMessage
-							log.Error("intercepted panic", pErrMsg)
+							log.Error("Intercepted panic", pErrMsg)
 						} else {
 							log.Error(err)
 						}
@@ -319,7 +318,7 @@ func main() {
 	// stops receivers first, udp sockets will be down
 	for _, recv := range receivers {
 		if err := recv.Stop(); err != nil {
-			log.Error("error stopping receiver", err)
+			log.Error("Error stopping receiver", err)
 		}
 	}
 	// then stop pipe
@@ -330,11 +329,11 @@ func main() {
 	flowProducer.Close()
 	// close transporter (eg: flushes message to Kafka) ignore errors, we're exiting anyway
 	_ = transporter.Close()
-	log.Info("transporter closed")
+	log.Info("Transporter closed")
 	// close http server (prometheus + health check)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Error("error shutting-down HTTP server", err)
+		log.Error("Error shutting-down HTTP server", err)
 	}
 	cancel()
 	close(q) // close errors
