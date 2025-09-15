@@ -66,10 +66,10 @@ func (d *ZmqDriver) Prepare() error {
 
 func (d *ZmqDriver) Init() error {
 	d.lock.Lock()
+	defer d.lock.Unlock()
 	d.context, _ = zmq.NewContext()
 	d.publisher, _ = d.context.NewSocket(zmq.PUB)
 	if err := d.publisher.Bind(d.listenAddress); err != nil {
-		d.lock.Unlock()
 		log.Fatalf("Unable to bind: %s", err.Error())
 	}
 
@@ -77,7 +77,6 @@ func (d *ZmqDriver) Init() error {
 
 	//  Ensure subscriber connection has time to complete
 	time.Sleep(time.Second)
-	d.lock.Unlock()
 	return nil
 }
 
@@ -91,6 +90,9 @@ func (d *ZmqDriver) Send(key, data []byte) error {
 	}
 
 	msg_len := uint16(len(data))
+	// Lock before creating zmq header to ensure messageId is unique
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	header := d.newZmqHeader(msg_len)
 
 	// send our header with the topic first as a multi-part message
@@ -100,26 +102,21 @@ func (d *ZmqDriver) Send(key, data []byte) error {
 		return err
 	}
 
-	d.lock.Lock()
 	bytes, err := d.publisher.SendBytes(hbytes, zmq.SNDMORE)
 	if err != nil {
 		log.Errorf("Unable to send header: %s", err.Error())
-		d.lock.Unlock()
 		return err
 	}
 	if bytes != len(hbytes) {
 		log.Errorf("Wrote the wrong number of header bytes: %d", bytes)
-		d.lock.Unlock()
 		return err
 	}
 
 	// now send the actual payload
 	if _, err = d.publisher.SendBytes(data, 0); err != nil {
 		log.Error(err)
-		d.lock.Unlock()
 		return err
 	}
-	d.lock.Unlock()
 
 	switch d.msgType {
 	case PBUF:
