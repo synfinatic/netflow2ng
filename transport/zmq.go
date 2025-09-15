@@ -56,7 +56,7 @@ type zmqHeader struct {
 	msg_id    uint32
 }
 
-var messageId uint32 = 0 // Every ZMQ message we send should have a uniq ID
+var messageId uint32 = 1 // Every ZMQ message we send should have a uniq ID
 
 func (d *ZmqDriver) Prepare() error {
 	// Ideally the code in transport.RegisterZmq would be in here, but I don't
@@ -83,6 +83,12 @@ func (d *ZmqDriver) Init() error {
 
 func (d *ZmqDriver) Send(key, data []byte) error {
 	var err error
+
+	if messageId == 1 {
+		log.Info("Sending first ZMQ message.")
+	} else if messageId%1000 == 0 {
+		log.Debugf("Sending ZMQ message id %d.", messageId)
+	}
 
 	msg_len := uint16(len(data))
 	header := d.newZmqHeader(msg_len)
@@ -117,17 +123,17 @@ func (d *ZmqDriver) Send(key, data []byte) error {
 
 	switch d.msgType {
 	case PBUF:
-		log.Debugf("sent %d bytes of pbuf:\n%s", msg_len, hex.Dump(data))
+		log.Tracef("Sent %d bytes of pbuf:\n%s", msg_len, hex.Dump(data))
 	case JSON:
 		if d.compress {
-			log.Debugf("sent %d bytes of zlib json:\n%s", msg_len, hex.Dump(data))
+			log.Tracef("Sent %d bytes of zlib json:\n%s", msg_len, hex.Dump(data))
 		} else {
-			log.Debugf("sent %d bytes of json: %s", msg_len, string(data))
+			log.Tracef("Sent %d bytes of json: %s", msg_len, string(data))
 		}
 	case TLV:
-		log.Debugf("sent %d bytes of ntop tlv:\n%s", msg_len, hex.Dump(data))
+		log.Tracef("Sent %d bytes of ntop tlv:\n%s", msg_len, hex.Dump(data))
 	default:
-		log.Errorf("sent %d bytes of unknown message type %d", msg_len, d.msgType)
+		log.Errorf("Sent %d bytes of unknown message type %d", msg_len, d.msgType)
 	}
 
 	return err
