@@ -2,8 +2,8 @@ services:
   netflow2ng:
     container_name: netflow2ng
     restart: unless-stopped
-    image: synfinatic/netflow2ng:v0.0.6
-    entrypoint: /netflow2ng --tlv # --level=debug
+    image: synfinatic/netflow2ng:v0.1.1
+    entrypoint: /netflow2ng # --level=debug
     ports:
       - 5556:5556/tcp
       - 8080:8080/tcp

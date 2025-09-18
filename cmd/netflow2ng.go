@@ -73,22 +73,21 @@ func (a *Address) Value() (string, int) {
 }
 
 type CLI struct {
-	Listen Address `kong:"short='a',help='NetFlow/IPFIX listen address:port',default='0.0.0.0:2055'"`
-	Reuse  bool    `kong:"help='Enable SO_REUSEPORT for NetFlow/IPFIX listen port'"`
+	Listen Address `short:"a" help:"NetFlow/IPFIX listen address:port" default:"0.0.0.0:2055"`
+	Reuse  bool    `help:"Enable SO_REUSEPORT for NetFlow/IPFIX listen port"`
 
-	Metrics Address `kong:"short='m',help='Metrics listen address',default='0.0.0.0:8080'"`
+	Metrics Address `short:"m" help:"Metrics listen address" default:"0.0.0.0:8080"`
 
-	ListenZmq string   `kong:"short='z',help='proto://IP:Port to listen on for ZMQ connections',default='tcp://*:5556'"`
-	Topic     string   `kong:"help='ZMQ Topic',default='flow'"`
-	SourceId  SourceId `kong:"help='NetFlow SourceId (0-255)',default=0"`
-	Compress  bool     `kong:"help='Compress ZMQ JSON data',xor='zmq-data'"`
-	Protobuf  bool     `kong:"help='Use ProtoBuff instead of JSQN for ZMQ',xor='zmq-data'"`
-	TLV       bool     `kong:"help='Use TLV instead of JSQN for ZMQ (needed for ntopng 6.4 and later)',xor='zmq-data'"`
+	ListenZmq string   `short:"z" help:"proto://IP:Port to listen on for ZMQ connections" default:"tcp://*:5556"`
+	Topic     string   `help:"ZMQ Topic" default:"flow"`
+	SourceId  SourceId `help:"NetFlow SourceId (0-255)" default:"0"`
+	Format    string   `short:"f" help:"Output format [tlv|json|jcompress|proto] for ZMQ." enum:"tlv,json,jcompress,proto" default:"tlv"`
+	Workers   int      `short:"w" help:"Number of NetFlow workers" default:"2"`
 
-	Workers   int    `kong:"short='w',help='Number of NetFlow workers',default=2"`
-	LogLevel  string `kong:"short='l',help='Log level [error|warn|info|debug|trace]',default='info',enum='error,warn,info,debug,trace'"`
-	LogFormat string `kong:"short='f',help='Log format [default|json]',default='default',enum='default,json'"`
-	Version   bool   `kong:"short='v',help='Print version and copyright info'"`
+	LogLevel  string `short:"l" help:"Log level [error|warn|info|debug|trace]" default:"info" enum:"error,warn,info,debug,trace"`
+	LogFormat string `help:"Log format [default|json]" default:"default" enum:"default,json"`
+
+	Version bool `short:"v" help:"Print version and copyright info"`
 }
 
 func LoadMappingYaml() (*protoproducer.ProducerConfig, error) {
@@ -139,25 +138,33 @@ func main() {
 	var msgType localtransport.MsgFormat
 	var formatter *format.Format
 
-	if rctx.cli.Protobuf {
-		msgType = localtransport.PBUF
-		log.Fatal("Protobuf not yet supported with goflow2")
-	} else if rctx.cli.TLV {
+	compress := false // For now, only compressing JSON.
+
+	switch rctx.cli.Format {
+	case "tlv":
 		msgType = localtransport.TLV
 		formatter, err = format.FindFormat("ntoptlv")
 		log.Info("Using ntopng TLV format for ZMQ")
-	} else {
+	case "protobuf":
+		msgType = localtransport.PBUF
+		log.Fatal("Protobuf not yet supported with goflow2")
+	case "jcompress":
+		compress = true
+		log.Info("Using ntopng compressed JSON format for ZMQ")
+		fallthrough
+	case "json":
 		msgType = localtransport.JSON
 		formatter, err = format.FindFormat("ntopjson")
 		log.Info("Using ntopng JSON format for ZMQ")
+	default:
+		log.Fatal("Unknown output format")
 	}
 
 	if err != nil {
-		log.Error("Avail formatters:", format.GetFormats())
-		log.Fatal("error formatter", err)
+		log.Fatal("Avail formatters:", format.GetFormats(), err)
 	}
 
-	localtransport.RegisterZmq(rctx.cli.ListenZmq, msgType, int(rctx.cli.SourceId), rctx.cli.Compress)
+	localtransport.RegisterZmq(rctx.cli.ListenZmq, msgType, int(rctx.cli.SourceId), compress)
 
 	transporter, err := transport.FindTransport("zmq")
 	if err != nil {

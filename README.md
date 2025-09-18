@@ -35,7 +35,9 @@ Hence, I created netflow2ng.
 
 ### Configuration
 
- 1. For a list of configuration arguments, run `netflow2ng -h`  Note from  `ntopng` v6.4 onwards you must use `--tlv`.
+ 1. For a list of configuration arguments, run `netflow2ng -h`. As of v0.1.1, netflow2ng
+    defaults to the ntopng TLV format instead of JSON. If you want to use JSON, you must
+    use it with `ntopng` v6.3 or earlier.
  1. Configure your network device(s) to send NetFlow stats to netflow2ng
  1. Configure your [ntopng](https://www.ntop.org/products/traffic-analysis/ntop/)
     service to read from netflow2ng: `ntopng -i tcp://192.168.1.1:5556` where
