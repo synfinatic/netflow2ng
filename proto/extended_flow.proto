@@ -1,7 +1,7 @@
 syntax = "proto3";
 package proto;
 option go_package = "github.com/synfinatic/netflow2ng/proto;proto";
-import "pb/flow.proto";  // relative path from ~/go/mod/github.com/netsampler/goflow2/v2 used in Makefile
+import "pb/flow.proto";  // relative path from ~/go/pkg/mod/github.com/netsampler/goflow2/v2 used in Makefile
 
 message ExtendedFlowMessage {
   flowpb.FlowMessage base_flow = 1;

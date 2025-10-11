@@ -12,6 +12,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
+replace github.com/netsampler/goflow2/v2 v2.2.3 => github.com/kellybyrd/goflow2/v2 v2.0.0-20251011184046-4bd9f09f7d65
+
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

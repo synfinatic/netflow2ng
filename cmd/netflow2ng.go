@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -272,6 +273,23 @@ func main() {
 
 	var decodeFunc utils.DecoderFunc
 	p := utils.NewNetFlowPipe(cfgPipe)
+
+	http.HandleFunc("/templates", func(wr http.ResponseWriter, r *http.Request) {
+		templates := p.GetTemplatesForAllSources()
+		if body, err := json.MarshalIndent(templates, "", "  "); err != nil {
+			log.Error("error writing JSON body for /templates", err)
+			wr.WriteHeader(http.StatusInternalServerError)
+			if _, err := wr.Write([]byte("Internal Server Error\n")); err != nil {
+				log.Error("error writing HTTP", err)
+			}
+		} else {
+			wr.Header().Add("Content-Type", "application/json")
+			wr.WriteHeader(http.StatusOK)
+			if _, err := wr.Write(body); err != nil {
+				log.Error("error writing HTTP", err)
+			}
+		}
+	})
 
 	decodeFunc = p.DecodeFlow
 	// intercept panic and generate error

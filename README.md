@@ -51,6 +51,7 @@ Hence, I created netflow2ng.
  * Collect NetFlow v9 stats from one or more probes
  * Run a ZMQ Publisher for ntopng to collect metrics from
  * Prometheus metrics
+ * NetFlow Templates available via /templates HTTP endpoint
 
 ### Ports
 
