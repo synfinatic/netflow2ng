@@ -1,8 +1,6 @@
 package formatter
 
 import (
-	"bytes"
-	"compress/zlib"
 	"encoding/binary"
 	"encoding/json"
 	"net"
@@ -13,7 +11,6 @@ import (
 )
 
 type NtopngJson struct {
-	compress bool
 }
 
 func (d *NtopngJson) Prepare() error {
@@ -150,25 +147,5 @@ func (d *NtopngJson) toJSON(extFlow *proto.ExtendedFlowMessage) ([]byte, error) 
 	}
 
 	// convert to JSON
-	jdata, err := json.Marshal(retmap)
-	if err != nil {
-		return jdata, err
-	}
-
-	// TODO
-	if d.compress {
-		var zbuf bytes.Buffer
-		z := zlib.NewWriter(&zbuf)
-		if _, err = z.Write(jdata); err != nil {
-			return []byte{}, err
-		}
-		if err = z.Close(); err != nil {
-			return []byte{}, err
-		}
-		// must set jdata[0] = '\0' to indicate compressed data
-		jdata = nil // zero current buffer
-		jdata = append(jdata, 0)
-		jdata = append(jdata, zbuf.Bytes()...)
-	}
-	return jdata, nil
+	return json.Marshal(retmap)
 }
