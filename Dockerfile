@@ -2,12 +2,15 @@ FROM golang:alpine AS builder
 ARG LDFLAGS=""
 
 RUN apk update --no-cache && \
-    apk add git build-base gcc pkgconfig zeromq-dev
+    apk add git build-base gcc pkgconfig zeromq-dev protoc && \
+    apk add --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing protoc-gen-go
 
 COPY . /build
 WORKDIR /build
 
-RUN OUTPUT_NAME=dist/netflow2ng make
+# manually download modules before invoking make
+RUN go mod download && \
+    OUTPUT_NAME=dist/netflow2ng make
 
 FROM alpine:latest
 ARG src_dir
