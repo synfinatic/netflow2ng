@@ -33,6 +33,9 @@ Hence, I created netflow2ng.
  1. Pull the latest [docker image](https://hub.docker.com/r/synfinatic/netflow2ng)
  1. Use the optional [docker-compose.yaml](docker-compose.yaml) file
 
+ **Important**: When using Docker, you must use host networking due to NAT causing the source
+ port to change for inbound Netflow packets which breaks `netflow2ng`.
+
 ### Configuration
 
  1. For a list of configuration arguments, run `netflow2ng -h`. As of v0.1.1, netflow2ng
