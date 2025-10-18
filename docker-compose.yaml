@@ -4,19 +4,17 @@ services:
     restart: unless-stopped
     image: synfinatic/netflow2ng:v0.1.1
     entrypoint: /netflow2ng # --level=debug
-    ports:
-      - 5556:5556/tcp
-      - 8080:8080/tcp
-      - 2055:2055/udp
+    # network mode must be host due to source port changing for inbound netflow packets with NAT
+    network_mode: host
 
   redis:
     image: "redis:alpine"
+    network_mode: host
 
   ntopng:
     image: "ntop/ntopng:latest"
-    command: ["--community", "--redis", "redis", "--interface", "tcp://netflow2ng:5556", "--disable-login", "--local-networks", "172.16.0.0/12", "--insecure"]
-    ports:
-      - "3000:3000"
+    command: ["--community", "--redis", "localhost", "--interface", "tcp://localhost:5556", "--disable-login", "--local-networks", "172.16.0.0/12", "--insecure"]
+    network_mode: host
     depends_on:
       - netflow2ng
       - redis
