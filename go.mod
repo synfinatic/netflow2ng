@@ -4,15 +4,14 @@ go 1.23.0
 
 require (
 	github.com/alecthomas/kong v1.2.1
-	github.com/netsampler/goflow2/v2 v2.2.3
+	//Replace this with just `v2.2.4` rather than a specific commit when goflow releases it.
+	github.com/netsampler/goflow2/v2 v2.2.4-0.20251223070637-4a9dce7dd686
 	github.com/pebbe/zmq4 v1.2.11
 	github.com/prometheus/client_golang v1.23.2
 	github.com/sirupsen/logrus v1.9.3
-	google.golang.org/protobuf v1.36.8
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )
-
-replace github.com/netsampler/goflow2/v2 v2.2.3 => github.com/kellybyrd/goflow2/v2 v2.0.0-20251011184046-4bd9f09f7d65
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
