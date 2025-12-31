@@ -5,7 +5,7 @@ go 1.23.0
 require (
 	github.com/alecthomas/kong v1.2.1
 	//Replace this with just `v2.2.4` rather than a specific commit when goflow releases it.
-	github.com/netsampler/goflow2/v2 v2.2.4-0.20251223070637-4a9dce7dd686
+	github.com/netsampler/goflow2/v2 v2.2.6
 	github.com/pebbe/zmq4 v1.2.11
 	github.com/prometheus/client_golang v1.23.2
 	github.com/sirupsen/logrus v1.9.3
