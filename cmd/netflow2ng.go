@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -234,10 +235,6 @@ func main() {
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-
-	var receivers []*utils.UDPReceiver
-	var pipes []utils.FlowPipe
-
 	q := make(chan bool)
 
 	Nfv9Ip, Nfv9Port := rctx.cli.Listen.Value()
@@ -257,7 +254,7 @@ func main() {
 		Blocking:         false,
 		ReceiverCallback: metrics.NewReceiverMetric(),
 	}
-	recv, err := utils.NewUDPReceiver(cfg)
+	nfRecv, err := utils.NewUDPReceiver(cfg)
 	if err != nil {
 		log.Fatal("Error creating UDP receiver", err.Error())
 		os.Exit(1)
@@ -271,18 +268,34 @@ func main() {
 	}
 
 	var decodeFunc utils.DecoderFunc
-	p := utils.NewNetFlowPipe(cfgPipe)
+	nfPipe := utils.NewNetFlowPipe(cfgPipe)
 
-	decodeFunc = p.DecodeFlow
+	http.HandleFunc("/templates", func(wr http.ResponseWriter, r *http.Request) {
+		templates := nfPipe.GetTemplatesForAllSources()
+		if body, err := json.MarshalIndent(templates, "", "  "); err != nil {
+			log.Error("error writing JSON body for /templates", err)
+			wr.WriteHeader(http.StatusInternalServerError)
+			if _, err := wr.Write([]byte("Internal Server Error\n")); err != nil {
+				log.Error("error writing HTTP", err)
+			}
+		} else {
+			wr.Header().Add("Content-Type", "application/json")
+			wr.WriteHeader(http.StatusOK)
+			if _, err := wr.Write(body); err != nil {
+				log.Error("error writing HTTP", err)
+			}
+		}
+	})
+
+	decodeFunc = nfPipe.DecodeFlow
 	// intercept panic and generate error
 	decodeFunc = debug.PanicDecoderWrapper(decodeFunc)
 	// wrap decoder with Prometheus metrics
 	decodeFunc = metrics.PromDecoderWrapper(decodeFunc, "netflow")
-	pipes = append(pipes, p)
 
 	// starts receivers
 	// the function either returns an error
-	if err := recv.Start(Nfv9Ip, Nfv9Port, decodeFunc); err != nil {
+	if err := nfRecv.Start(Nfv9Ip, Nfv9Port, decodeFunc); err != nil {
 		log.Fatal("Error starting netflow receiver: ", Nfv9Ip, Nfv9Port)
 	} else {
 		wg.Add(1)
@@ -293,7 +306,7 @@ func main() {
 				select {
 				case <-q:
 					return
-				case err := <-recv.Errors():
+				case err := <-nfRecv.Errors():
 					if errors.Is(err, net.ErrClosed) {
 						log.Info("Closed receiver")
 						continue
@@ -314,7 +327,6 @@ func main() {
 				}
 			}
 		}()
-		receivers = append(receivers, recv)
 	}
 
 	collecting = true
@@ -324,16 +336,9 @@ func main() {
 	collecting = false
 
 	// stops receivers first, udp sockets will be down
-	for _, recv := range receivers {
-		if err := recv.Stop(); err != nil {
-			log.Error("Error stopping receiver", err)
-		}
-	}
+	_ = nfRecv.Stop()
 	// then stop pipe
-	for _, pipe := range pipes {
-		pipe.Close()
-	}
-	// close producer
+	nfPipe.Close()
 	flowProducer.Close()
 	// close transporter (eg: flushes message to Kafka) ignore errors, we're exiting anyway
 	_ = transporter.Close()
