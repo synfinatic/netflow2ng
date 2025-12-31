@@ -1,8 +1,8 @@
 services:
   netflow2ng:
+    build: . # make sure to clone the whole repository
     container_name: netflow2ng
     restart: unless-stopped
-    image: synfinatic/netflow2ng:v0.1.1
     entrypoint: /netflow2ng # --level=debug
     # network mode must be host due to source port changing for inbound netflow packets with NAT
     network_mode: host
