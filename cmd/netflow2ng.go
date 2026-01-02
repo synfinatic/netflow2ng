@@ -36,7 +36,7 @@ import (
 )
 
 var (
-	COPYRIGHT_YEAR string = "2020-2022"
+	COPYRIGHT_YEAR string = "2020-2026"
 	Version        string = "unknown"
 	Buildinfos     string = "unknown"
 	Delta          string = ""
@@ -310,14 +310,14 @@ func main() {
 					if errors.Is(err, net.ErrClosed) {
 						log.Info("Closed receiver")
 						continue
-					} else if !errors.Is(err, netflow.ErrorTemplateNotFound) && !errors.Is(err, debug.PanicError) {
+					} else if !errors.Is(err, netflow.ErrorTemplateNotFound) && !errors.Is(err, &debug.PanicErrorMessage{}) {
 						log.Error("Error", err)
 						continue
 					} else {
 						if errors.Is(err, netflow.ErrorTemplateNotFound) {
 							log.Debug("Netflow packet received before template was set. Discarding")
 							log.Trace("More info: ", err)
-						} else if errors.Is(err, debug.PanicError) {
+						} else if errors.Is(err, &debug.PanicErrorMessage{}) {
 							var pErrMsg *debug.PanicErrorMessage
 							log.Error("Intercepted panic", pErrMsg)
 						} else {
