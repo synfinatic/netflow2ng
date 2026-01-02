@@ -28,10 +28,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y git make rpm golang libzmq5 libzmq5-dev ruby ruby-dev
           sudo gem install fpm
+          sudo mkdir -p /usr/local/
+          export PROTOC_VER=30.2
+          export PB_REL="https://github.com/protocolbuffers/protobuf/releases"
+          curl -LO ${PB_REL}/download/v${PROTOC_VER}/protoc-${PROTOC_VER}-linux-x86_64.zip | unzip -d /usr/local protoc-${PROTOC_VER}-linux-x86_64.zip
+
 
       - name: Run Makefile
         run: |
-          make
+          PATH=/usr/local/bin:${PATH} make
           make .package-deb
           make .package-rpm
 
