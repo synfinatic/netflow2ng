@@ -1,4 +1,4 @@
-PROJECT_VERSION := 0.1.1
+PROJECT_VERSION := 0.2.1
 DOCKER_REPO     := synfinatic
 PROJECT_NAME    := netflow2ng
 
@@ -37,6 +37,10 @@ LDFLAGS                   := -X "main.Version=$(PROJECT_VERSION)" -X "main.Delta
 OUTPUT_NAME               ?= $(DIST_DIR)$(PROJECT_NAME)-$(PROJECT_VERSION)
 ALL: netflow2ng
 
+GOBFLAGS                  := -trimpath
+LINUX_BIN                 := $(DIST_DIR)$(PROJECT_NAME)-$(PROJECT_VERSION)-linux-amd64
+LINUXARM64_BIN            := $(DIST_DIR)$(PROJECT_NAME)-$(PROJECT_VERSION)-linux-arm64
+
 include help.mk
 
 test: vet unittest lint ## Run important tests
@@ -54,11 +58,17 @@ clean-docker:
 clean-go:
 	go clean -i -r -cache -modcache
 
+clean-proto:
+	rm -f proto/extended_flow.pb.go
+
 netflow2ng: $(OUTPUT_NAME)
 
-$(OUTPUT_NAME): prepare protobuf
+$(OUTPUT_NAME): .prepare protobuf
 	go build -ldflags='$(LDFLAGS)' -o $(OUTPUT_NAME) ./cmd/...
 
+
+.go-mod-download:
+	go mod download
 
 ## Re-generate protobuf .pb.go. If you do this, be sure to edit the import path
 # in the resulting extended_flow.pb.go to add 'v2' to the go package path.
@@ -66,13 +76,18 @@ $(OUTPUT_NAME): prepare protobuf
 GOFLOW2_MOD_PATH := $(shell go list -f '{{.Dir}}' -m github.com/netsampler/goflow2/v2)
 protobuf: proto/extended_flow.pb.go
 
-proto/extended_flow.pb.go: proto/extended_flow.proto
+ifeq ($(GOOS),darwin)
+SEDFLAG := -i ''
+else
+SEDFLAG := -i
+endif
+
+proto/extended_flow.pb.go: proto/extended_flow.proto .go-mod-download
 	protoc --proto_path="$(GOFLOW2_MOD_PATH)" --proto_path=./proto --go_out=./proto \
 		--go_opt=paths=source_relative \
 		extended_flow.proto
 	@echo "Modifying import path in extended_flow.pb.go to add 'v2' to the go package path."
-	sed -i 's|pb "github.com/netsampler/goflow2/pb"|pb "github.com/netsampler/goflow2/v2/pb"|g' \
-			$@
+	sed $(SEDFLAG) 's|pb "github.com/netsampler/goflow2/pb"|pb "github.com/netsampler/goflow2/v2/pb"|g' $@
 
 PHONY: docker-run
 docker-run:  ## Run docker container locally
@@ -83,15 +98,14 @@ docker-run:  ## Run docker container locally
 		$(DOCKER_REPO)/$(PROJECT_NAME):v$(PROJECT_VERSION)
 
 PHONY: docker
-docker:  ## Build docker image
-	docker build -t $(DOCKER_REPO)/$(PROJECT_NAME):v$(PROJECT_VERSION) .
 
-docker-release: ## Tag and push docker images Linux AMD64
-	docker build \
+docker: ## Build docker images for Linux amd64/arm64
+	docker buildx build --platform linux/amd64,linux/arm64 \
 		-t $(DOCKER_REPO)/$(PROJECT_NAME):v$(PROJECT_VERSION) \
 		-t $(DOCKER_REPO)/$(PROJECT_NAME):latest \
-		--build-arg VERSION=v$(PROJECT_VERSION) \
 		-f Dockerfile .
+
+docker-publish:  ## Push docker images to hub.docker.com
 	docker push $(DOCKER_REPO)/$(PROJECT_NAME):v$(PROJECT_VERSION)
 	docker push $(DOCKER_REPO)/$(PROJECT_NAME):latest
 
@@ -132,13 +146,36 @@ test-tidy:  ## Test to make sure go.mod is tidy
 lint:  ## Run golangci-lint
 	golangci-lint run
 
-.PHONY: prepare
-prepare:
+.PHONY: .prepare
+.prepare:
 	mkdir -p $(DIST_DIR)
 
+#.PHONY: package
+#package:  ## Build .deb and .rpm packages
+#	docker compose -f docker-compose-pkg.yml up
+
+linux: $(LINUX_BIN)  ## Build Linux/x86_64 binary
+
+$(LINUX_BIN): $(wildcard */*.go) .prepare
+	GOARCH=amd64 GOOS=linux go build $(GOBFLAGS) -ldflags='$(LDFLAGS)' -o $(LINUX_BIN) ./cmd/...
+	@echo "Created: $(LINUX_BIN)"
+
+linux-arm64: $(LINUXARM64_BIN)  ## Build Linux/arm64 binary
+
+$(LINUXARM64_BIN): $(wildcard */*.go) .prepare
+	GOARCH=arm64 GOOS=linux go build $(GOBFLAGS) -ldflags='$(LDFLAGS)' -o $(LINUXARM64_BIN) ./cmd/...
+	@echo "Created: $(LINUXARM64_BIN)"
+
+
 .PHONY: package
-package:  ## Build .deb and .rpm packages
-	docker compose -f docker-compose-pkg.yml up
+package: ## Build deb/rpm packages
+	docker build -t netflow2ng-builder:latest -f Dockerfile.package .
+	docker run --rm \
+		-v $$(pwd)/dist:/root/dist \
+		-e VERSION=$(PROJECT_VERSION) \
+		-e UID=$$(id -u) \
+		-e GID=$$(id -g) \
+		netflow2ng-builder:latest
 
 # These targets aren't for you.
 .PHONY: .package-deb
@@ -161,7 +198,7 @@ package:  ## Build .deb and .rpm packages
         --url "$(URL)" \
         --architecture $(ARCH) \
         --license "$(LICENSE) "\
-		--depends "zeromq" \
+	--depends "zeromq" \
         --package $(DIST_DIR) \
         $(OUTPUT_NAME)=/usr/bin/netflow2ng \
         package/netflow2ng.service=/lib/systemd/system/netflow2ng.service \
