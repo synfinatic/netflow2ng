@@ -32,7 +32,7 @@ jobs:
           export PROTOC_VER=30.2
           export PB_REL="https://github.com/protocolbuffers/protobuf/releases"
           curl -LO ${PB_REL}/download/v${PROTOC_VER}/protoc-${PROTOC_VER}-linux-x86_64.zip 
-          unzip -d /usr/local protoc-${PROTOC_VER}-linux-x86_64.zip
+          sudo unzip -d /usr/local protoc-${PROTOC_VER}-linux-x86_64.zip
 
 
       - name: Run Makefile
