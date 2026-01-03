@@ -86,6 +86,10 @@ jobs:
         run: |
           gpg -K
 
+      - name: List files to sign
+        run: |
+          ls dist/
+
       - name: Create signature file
         run: |
           export GPG_TTY=$(tty)
