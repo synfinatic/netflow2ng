@@ -88,7 +88,7 @@ jobs:
 
       - name: Create signature file
         run: |
-          shasum -a 256 dist/* | gpg --clear-sign -u 87079817F86EDAE6 > dist/release.sig.asc
+          shasum -a 256 dist/* | gpg --clear-sign > dist/release.sig.asc
 
       # Source: https://github.com/svenstaro/upload-release-action
       - name: Upload all files to release
