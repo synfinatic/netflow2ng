@@ -197,8 +197,8 @@ package: ## Build deb/rpm packages
         --description "$(DESCRIPTION)" \
         --url "$(URL)" \
         --architecture $(ARCH) \
-        --license "$(LICENSE) "\
-	--depends "zeromq" \
+        --license "$(LICENSE)" \
+        --depends "zeromq" \
         --package $(DIST_DIR) \
         $(OUTPUT_NAME)=/usr/bin/netflow2ng \
         package/netflow2ng.service=/lib/systemd/system/netflow2ng.service \
