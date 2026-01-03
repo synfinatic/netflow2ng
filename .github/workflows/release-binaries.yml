@@ -81,8 +81,7 @@ jobs:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
           trust_level: 5
-          fingerprint: "3167CCD660810FFCB7499A8F87079817F86EDAE6"
-
+          
       - name: Verify GPG key
         run: |
           gpg --list-secret-keys
