@@ -37,7 +37,8 @@ jobs:
 
       - name: Run Makefile
         run: |
-          PATH=/usr/local/bin:$(go env GOPATH)/bin:${PATH} make
+          export PATH=/usr/local/bin:$(go env GOPATH)/bin:${PATH}
+          make
           make .package-deb
           make .package-rpm
 
