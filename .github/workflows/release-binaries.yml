@@ -26,7 +26,7 @@ jobs:
       - name: Install packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y git make rpm golang libzmq5 libzmq5-dev ruby ruby-dev
+          sudo apt-get install -y git make rpm libzmq5 libzmq5-dev ruby ruby-dev
           sudo gem install fpm
           sudo mkdir -p /usr/local/
           export PROTOC_VER=30.2
@@ -38,6 +38,10 @@ jobs:
       - name: Run Makefile
         run: |
           export PATH=/usr/local/bin:$(go env GOPATH)/bin:${PATH}
+          echo $PATH
+          echo "GoPATH bin contents:"
+          ls $(go env GOPATH)/bin
+          go version
           make
           make .package-deb
           make .package-rpm
