@@ -92,7 +92,7 @@ jobs:
 
       - name: Create signature file
         run: |
-          export GPG_TTY=$(tty)
+          export GPG_TTY=`tty`
           shasum -a 256 dist/* | gpg --clear-sign > dist/release.sig.asc
 
       # Source: https://github.com/svenstaro/upload-release-action
