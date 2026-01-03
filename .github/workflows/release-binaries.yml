@@ -67,12 +67,12 @@ jobs:
         with:
           name: ubuntu-build-files
           path: dist/
-
-      - name: Download macos binaries
-        uses: actions/download-artifact@v7
-        with:
-          name: macos-build-files
-          path: dist/
+#
+#      - name: Download macos binaries
+#        uses: actions/download-artifact@v7
+#        with:
+#          name: macos-build-files
+#          path: dist/
 
       # Source: https://github.com/crazy-max/ghaction-import-gpg
       - name: Import GPG key
