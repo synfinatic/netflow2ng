@@ -73,7 +73,6 @@ $(OUTPUT_NAME): .prepare protobuf
 ## Re-generate protobuf .pb.go. If you do this, be sure to edit the import path
 # in the resulting extended_flow.pb.go to add 'v2' to the go package path.
 # Ex: 'import pb "github.com/netsampler/goflow2/v2/pb
-GOFLOW2_MOD_PATH := $(shell go list -f '{{.Dir}}' -m github.com/netsampler/goflow2/v2)
 protobuf: proto/extended_flow.pb.go
 
 ifeq ($(GOOS),darwin)
@@ -83,7 +82,8 @@ SEDFLAG := -i
 endif
 
 proto/extended_flow.pb.go: proto/extended_flow.proto .go-mod-download
-	protoc --proto_path="$(GOFLOW2_MOD_PATH)" --proto_path=./proto --go_out=./proto \
+	protoc --proto_path="$(shell go list -f '{{.Dir}}' -m github.com/netsampler/goflow2/v2)" \
+		--proto_path=./proto --go_out=./proto \
 		--go_opt=paths=source_relative \
 		extended_flow.proto
 	@echo "Modifying import path in extended_flow.pb.go to add 'v2' to the go package path."
