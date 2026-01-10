@@ -1,20 +1,46 @@
 services:
   netflow2ng:
-    build: . # make sure to clone the whole repository
-    container_name: netflow2ng
+    build: .
     restart: unless-stopped
-    entrypoint: /netflow2ng # --level=debug
-    # network mode must be host due to source port changing for inbound netflow packets with NAT
-    network_mode: host
+    ports:
+      - '2055:2055/udp'
+      # - '8080:8080/tcp'
 
   redis:
     image: "redis:alpine"
-    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    command:
+      - "redis-server"
 
   ntopng:
     image: "ntop/ntopng:latest"
-    command: ["--community", "--redis", "localhost", "--interface", "tcp://localhost:5556", "--disable-login", "--local-networks", "172.16.0.0/12", "--insecure"]
-    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ntopng-data:/var/lib/ntopng
+    ports:
+      - '3000:3000/tcp'
     depends_on:
       - netflow2ng
       - redis
+    environment:
+      - TZ=PDT
+    command: 
+      - "--community"
+      - "--redis"
+      - "redis"
+      - "--interface"
+      - "zmq://netflow2ng:5556"
+      - "--local-networks"
+      - "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7,fe80::/10,127.0.0.0/8,::1/128"
+      - "--disable-login"
+      - "1"
+      - "--dns-mode"
+      - "1"
+
+volumes:
+  redis-data:
+    driver: local
+  ntopng-data:
+    driver: local
