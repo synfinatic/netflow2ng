@@ -315,7 +315,7 @@ func main() {
 						continue
 					} else {
 						if errors.Is(err, netflow.ErrorTemplateNotFound) {
-							log.Debug("Netflow packet received before template was set. Discarding")
+							log.Debug("NetFlow/IPFIX packet received before template was set. Discarding")
 							log.Trace("More info: ", err)
 						} else if errors.Is(err, &debug.PanicErrorMessage{}) {
 							var pErrMsg *debug.PanicErrorMessage

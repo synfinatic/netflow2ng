@@ -7,7 +7,7 @@ netflow2ng is a NetFlow v9/IPFIX collector that forwards flow data to [ntopng](h
 ## Architecture
 
 ```
-┌─────────────────┐    NetFlow v9    ┌─────────────────┐      ZMQ       ┌─────────────────┐
+┌─────────────────┐  NetFlow v9/IPFIX ┌─────────────────┐      ZMQ       ┌─────────────────┐
 │  Network Device │ ──────────────▶  │   netflow2ng    │ ─────────────▶ │     ntopng      │
 │  (Router/Switch)│    UDP:2055      │   (collector)   │   TCP:5556     │   (analyzer)    │
 └─────────────────┘                  └─────────────────┘                └─────────────────┘
@@ -59,7 +59,7 @@ netflow2ng is a NetFlow v9/IPFIX collector that forwards flow data to [ntopng](h
 ## Data Flow
 
 1. **Collection**: goflow2 receives NetFlow v9/IPFIX packets on UDP port 2055
-2. **Decoding**: goflow2 decodes packets into `ProtoProducerMessage` using our custom `mapping.yaml`
+2. **Decoding**: goflow2 decodes packets into `ProtoProducerMessage` using our custom `mapping.yaml` (both protocols auto-detected)
 3. **Conversion**: Formatter converts messages to `ExtendedFlowMessage` to preserve IN/OUT byte counters
 4. **Encoding**: Formatter encodes to TLV or JSON format for ntopng
 5. **Transport**: ZMQ transport wraps data in `zmqHeaderV3` and publishes on TCP port 5556
@@ -77,7 +77,7 @@ netflow2ng is a NetFlow v9/IPFIX collector that forwards flow data to [ntopng](h
 
 | Port | Protocol | Purpose |
 |------|----------|---------|
-| 2055 | UDP | NetFlow/IPFIX listener |
+| 2055 | UDP | NetFlow v9/IPFIX listener |
 | 5556 | TCP | ZMQ publisher for ntopng |
 | 8080 | TCP | Prometheus metrics & `/templates` endpoint |
 
