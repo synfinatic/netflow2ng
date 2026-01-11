@@ -1,5 +1,5 @@
 # netflow2ng
-NetFlow v9 collector for [ntopng](https://www.ntop.org/products/traffic-analysis/ntop/)
+NetFlow v9/IPFIX collector for [ntopng](https://www.ntop.org/products/traffic-analysis/ntop/)
 
 [![Tests](https://github.com/synfinatic/netflow2ng/actions/workflows/tests.yml/badge.svg)](https://github.com/synfinatic/netflow2ng/actions/workflows/tests.yml)
 [![codeql-analysis.yml](https://github.com/synfinatic/netflow2ng/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/synfinatic/netflow2ng/actions/workflows/codeql-analysis.yml)
@@ -48,10 +48,10 @@ Hence, I created netflow2ng.
 
 ### Features
 
- * Collect NetFlow v9 stats from one or more probes
+ * Collect NetFlow v9 and IPFIX stats from one or more probes
  * Run a ZMQ Publisher for ntopng to collect metrics from
  * Prometheus metrics
- * NetFlow Templates available via /templates HTTP endpoint
+ * NetFlow/IPFIX Templates available via /templates HTTP endpoint
 
 ### Ports
 
@@ -60,15 +60,16 @@ By default, netflow2ng listens on all addresses on the following ports. This can
  * ZMQ connections (TCP): 5556
  * Metrics: 8080
 
-### NetFlow v9 Support
+### NetFlow v9/IPFIX Support
 
-netflow2ng utilizes [goflow2](https://github.com/netsampler/goflow2) for NetFlow
-decoding.  For more information on what NetFlow fields are supported in
+netflow2ng utilizes [goflow2](https://github.com/netsampler/goflow2) for NetFlow v9
+and IPFIX decoding. Both protocols are automatically detected on the same port.
+For more information on what NetFlow/IPFIX fields are supported in
 netflow2ng, please read the goflow docs.
 
-### sFlow/IPFIX/etc support?
+### sFlow/NetFlow v5 support?
 
-In theory, adding sFlow/IPFIX/NetFlow v5 support should be pretty trivial, but
+In theory, adding sFlow/NetFlow v5 support should be pretty trivial, but
 isn't something I plan on doing due to lack of hardware for testing/need.
 
 ### How is netflow2ng different from nProbe?

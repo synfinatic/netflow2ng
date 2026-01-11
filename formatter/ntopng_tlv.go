@@ -122,12 +122,19 @@ func (d *NtopngTlv) toTLV(extFlow *proto.ExtendedFlowMessage) ([]byte, error) {
 		ndpiItem{Key: netflow.NFV9_FIELD_OUT_BYTES, Value: extFlow.OutBytes},
 		ndpiItem{Key: netflow.NFV9_FIELD_OUT_PKTS, Value: extFlow.OutPackets},
 	)
-	// Goflow2 protobuf provides time in ns, but it ntopng expects time in seconds.
+	// Goflow2 protobuf provides time in ns. Send both NFv9 (seconds) and IPFIX (milliseconds)
+	// fields for maximum compatibility with ntopng.
 	items = append(items,
+		// NetFlow v9 fields (seconds precision)
 		ndpiItem{Key: netflow.NFV9_FIELD_FIRST_SWITCHED,
 			Value: uint32(baseFlow.TimeFlowStartNs / 1_000_000_000)},
 		ndpiItem{Key: netflow.NFV9_FIELD_LAST_SWITCHED,
 			Value: uint32(baseFlow.TimeFlowEndNs / 1_000_000_000)},
+		// IPFIX fields (milliseconds precision)
+		ndpiItem{Key: netflow.IPFIX_FIELD_flowStartMilliseconds,
+			Value: uint64(baseFlow.TimeFlowStartNs / 1_000_000)},
+		ndpiItem{Key: netflow.IPFIX_FIELD_flowEndMilliseconds,
+			Value: uint64(baseFlow.TimeFlowEndNs / 1_000_000)},
 	)
 
 	items = append(items,

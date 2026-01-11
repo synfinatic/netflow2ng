@@ -64,11 +64,18 @@ func (d *NtopngJson) toJSON(extFlow *proto.ExtendedFlowMessage) ([]byte, error) 
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_IN_PKTS)] = extFlow.InPackets
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_OUT_BYTES)] = extFlow.OutBytes
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_OUT_PKTS)] = extFlow.OutPackets
-	// Goflow2 protobuf provides time in ns, but it ntopng expects time in seconds.
+	// Goflow2 protobuf provides time in ns. Send both NFv9 (seconds) and IPFIX (milliseconds)
+	// fields for maximum compatibility with ntopng.
+	// NetFlow v9 fields (seconds precision)
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_FIRST_SWITCHED)] =
 		uint32(baseFlow.TimeFlowStartNs / 1_000_000_000)
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_LAST_SWITCHED)] =
 		uint32(baseFlow.TimeFlowEndNs / 1_000_000_000)
+	// IPFIX fields (milliseconds precision)
+	retmap[strconv.Itoa(netflow.IPFIX_FIELD_flowStartMilliseconds)] =
+		uint64(baseFlow.TimeFlowStartNs / 1_000_000)
+	retmap[strconv.Itoa(netflow.IPFIX_FIELD_flowEndMilliseconds)] =
+		uint64(baseFlow.TimeFlowEndNs / 1_000_000)
 
 	// L4
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_PROTOCOL)] = baseFlow.Proto
