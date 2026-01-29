@@ -16,7 +16,11 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+	"github.com/synfinatic/netflow2ng/collector"
+	"github.com/synfinatic/netflow2ng/dedup"
 	localformatters "github.com/synfinatic/netflow2ng/formatter"
+	"github.com/synfinatic/netflow2ng/sampling"
+	"github.com/synfinatic/netflow2ng/sflow"
 	localtransport "github.com/synfinatic/netflow2ng/transport"
 	"gopkg.in/yaml.v3"
 
@@ -44,6 +48,10 @@ var (
 	Tag            string = "NO-TAG"
 	log            *logrus.Logger
 	rctx           RunContext
+)
+
+const (
+	METRICS_NAMESPACE = "netflow2ng"
 )
 
 type RunContext struct {
@@ -74,17 +82,38 @@ func (a *Address) Value() (string, int) {
 }
 
 type CLI struct {
-	Listen Address `short:"a" help:"NetFlow/IPFIX listen address:port" default:"0.0.0.0:2055"`
-	Reuse  bool    `help:"Enable SO_REUSEPORT for NetFlow/IPFIX listen port"`
+	// NetFlow/IPFIX Configuration
+	Listen  Address `short:"a" help:"NetFlow/IPFIX listen address:port" default:"0.0.0.0:2055"`
+	Reuse   bool    `help:"Enable SO_REUSEPORT for NetFlow/IPFIX listen port"`
+	Workers int     `short:"w" help:"Number of NetFlow workers" default:"2"`
 
+	// sFlow Configuration
+	SFlowListen  Address `help:"sFlow listen address:port (empty to disable)" default:""`
+	SFlowWorkers int     `help:"Number of sFlow workers" default:"2"`
+
+	// Metrics/Health
 	Metrics Address `short:"m" help:"Metrics listen address" default:"0.0.0.0:8080"`
 
-	ListenZmq string   `short:"z" help:"proto://IP:Port to listen on for ZMQ connections" default:"tcp://*:5556"`
-	Topic     string   `help:"ZMQ Topic" default:"flow"`
-	SourceId  SourceId `help:"NetFlow SourceId (0-255)" default:"0"`
-	Format    string   `short:"f" help:"Output format [tlv|json|jcompress|proto] for ZMQ." enum:"tlv,json,jcompress,proto" default:"tlv"`
-	Workers   int      `short:"w" help:"Number of NetFlow workers" default:"2"`
+	// ZMQ Configuration
+	ListenZmq      string `short:"z" help:"ZMQ bind address(es), comma-separated for fan-out" default:"tcp://*:5556"`
+	FanoutStrategy string `help:"ZMQ fan-out strategy [hash|round-robin]" enum:"hash,round-robin" default:"hash"`
+	Topic          string `help:"ZMQ Topic" default:"flow"`
+	SourceId       SourceId `help:"NetFlow SourceId (0-255)" default:"0"`
+	Format         string `short:"f" help:"Output format [tlv|json|jcompress|proto] for ZMQ." enum:"tlv,json,jcompress,proto" default:"tlv"`
 
+	// Sampling Configuration
+	DisableUpscaling bool `help:"Disable sampling rate upscaling (use when exporters pre-scale)"`
+	DefaultSampleRate int `help:"Default sampling rate when not reported by exporter" default:"1"`
+
+	// Deduplication Configuration
+	DedupEnabled bool          `help:"Enable flow deduplication" default:"false"`
+	DedupMaxSize int           `help:"Maximum dedup cache size" default:"100000"`
+	DedupTTL     time.Duration `help:"Dedup cache entry TTL" default:"60s"`
+
+	// Queue Configuration
+	QueueSize int `help:"Packet queue size" default:"1000000"`
+
+	// Logging
 	LogLevel  string `short:"l" help:"Log level [error|warn|info|debug|trace]" default:"info" enum:"error,warn,info,debug,trace"`
 	LogFormat string `help:"Log format [default|json]" default:"default" enum:"default,json"`
 
@@ -98,21 +127,19 @@ func LoadMappingYaml() (*protoproducer.ProducerConfig, error) {
 	return config, err
 }
 
-// This entire main() is heavily based on cmd/main.go from netsampler/goflow2.
-// It can probably be simplified a bit more, but it works for now.
 func main() {
 	var err error
 	log = logrus.New()
 	log.SetFormatter(&logrus.TextFormatter{
 		DisableLevelTruncation: true,
 		PadLevelText:           true,
-		DisableTimestamp:       true,
+		DisableTimestamp:       false,
 	})
 
 	parser := kong.Must(
 		&rctx.cli,
 		kong.Name("netflow2ng"),
-		kong.Description("NetFlow v9/IPFIX Proxy for ntopng"),
+		kong.Description("High-throughput NetFlow v9/IPFIX/sFlow collector for ntopng"),
 		kong.UsageOnError(),
 	)
 
@@ -135,6 +162,31 @@ func main() {
 	log.SetLevel(lvl)
 	localformatters.SetLogger(log)
 	localtransport.SetLogger(log)
+	collector.SetLogger(log)
+	sampling.SetLogger(log)
+	dedup.SetLogger(log)
+	sflow.SetLogger(log)
+
+	// Initialize sampling tracker
+	samplingTracker := sampling.NewSamplingTracker(&sampling.SamplingTrackerConfig{
+		DefaultRate:    uint32(rctx.cli.DefaultSampleRate),
+		ScalingEnabled: !rctx.cli.DisableUpscaling,
+		Metrics:        sampling.NewSamplingMetrics(METRICS_NAMESPACE),
+	})
+
+	// Initialize dedup cache if enabled
+	var dedupCache *dedup.DedupCache
+	if rctx.cli.DedupEnabled {
+		dedupCache = dedup.NewDedupCache(&dedup.DedupCacheConfig{
+			MaxSize: rctx.cli.DedupMaxSize,
+			TTL:     rctx.cli.DedupTTL,
+			Metrics: dedup.NewDedupMetrics(METRICS_NAMESPACE),
+		})
+		log.WithFields(logrus.Fields{
+			"max_size": rctx.cli.DedupMaxSize,
+			"ttl":      rctx.cli.DedupTTL,
+		}).Info("Flow deduplication enabled")
+	}
 
 	var msgType localtransport.MsgFormat
 	var formatter *format.Format
@@ -165,7 +217,26 @@ func main() {
 		log.Fatal("Avail formatters:", format.GetFormats(), err)
 	}
 
-	localtransport.RegisterZmq(rctx.cli.ListenZmq, msgType, int(rctx.cli.SourceId), compress)
+	// Parse ZMQ endpoints and configure transport
+	zmqEndpoints := localtransport.ParseZmqEndpoints(rctx.cli.ListenZmq)
+	fanoutStrategy := localtransport.ParseFanoutStrategy(rctx.cli.FanoutStrategy)
+
+	localtransport.RegisterZmqWithConfig(&localtransport.ZmqConfig{
+		Endpoints:      zmqEndpoints,
+		MsgType:        msgType,
+		SourceId:       int(rctx.cli.SourceId),
+		Compress:       compress,
+		FanoutStrategy: fanoutStrategy,
+		Topic:          rctx.cli.Topic,
+		Metrics:        localtransport.NewZmqMetrics(METRICS_NAMESPACE),
+	})
+
+	if len(zmqEndpoints) > 1 {
+		log.WithFields(logrus.Fields{
+			"endpoints": zmqEndpoints,
+			"strategy":  rctx.cli.FanoutStrategy,
+		}).Info("Multi-endpoint ZMQ fan-out configured")
+	}
 
 	transporter, err := transport.FindTransport("zmq")
 	if err != nil {
@@ -201,7 +272,7 @@ func main() {
 	wg := &sync.WaitGroup{}
 
 	var collecting bool
-	// Note that goflow2 doesn't yet support a /templates endpoint. We probably should add that.
+	// HTTP server for metrics, health, and templates
 	http.Handle("/metrics", promhttp.Handler())
 	http.HandleFunc("/__health", func(wr http.ResponseWriter, r *http.Request) {
 		if !collecting {
@@ -217,6 +288,43 @@ func main() {
 			}
 		}
 	})
+
+	// Sampling info endpoint
+	http.HandleFunc("/sampling", func(wr http.ResponseWriter, r *http.Request) {
+		info := samplingTracker.GetAllSamplingInfo()
+		wr.Header().Add("Content-Type", "application/json")
+		if body, err := json.MarshalIndent(info, "", "  "); err != nil {
+			log.Error("error writing JSON body for /sampling", err)
+			wr.WriteHeader(http.StatusInternalServerError)
+		} else {
+			wr.WriteHeader(http.StatusOK)
+			if _, err := wr.Write(body); err != nil {
+				log.Error("error writing HTTP", err)
+			}
+		}
+	})
+
+	// Dedup stats endpoint
+	if dedupCache != nil {
+		http.HandleFunc("/dedup", func(wr http.ResponseWriter, r *http.Request) {
+			stats := map[string]interface{}{
+				"cache_size": dedupCache.Size(),
+				"max_size":   rctx.cli.DedupMaxSize,
+				"ttl":        rctx.cli.DedupTTL.String(),
+			}
+			wr.Header().Add("Content-Type", "application/json")
+			if body, err := json.MarshalIndent(stats, "", "  "); err != nil {
+				log.Error("error writing JSON body for /dedup", err)
+				wr.WriteHeader(http.StatusInternalServerError)
+			} else {
+				wr.WriteHeader(http.StatusOK)
+				if _, err := wr.Write(body); err != nil {
+					log.Error("error writing HTTP", err)
+				}
+			}
+		})
+	}
+
 	srv := http.Server{
 		Addr:              string(rctx.cli.Metrics),
 		ReadHeaderTimeout: time.Second * 5,
@@ -243,7 +351,7 @@ func main() {
 	// workers were on the command-line.
 	numSockets := 1
 	numWorkers := rctx.cli.Workers
-	queueSize := 1000000
+	queueSize := rctx.cli.QueueSize
 
 	log.Info("Starting collection. It may take several minutes for the first flows to appear in ntopng.")
 
@@ -329,11 +437,63 @@ func main() {
 		}()
 	}
 
+	// Start sFlow collector if configured
+	var sflowCollector *sflow.SFlowCollector
+	if string(rctx.cli.SFlowListen) != "" {
+		sflowIP, sflowPort := rctx.cli.SFlowListen.Value()
+
+		// Create flow handler that sends sFlow data to the same transport
+		sflowHandler := func(msg *sflow.FlowMessage) error {
+			// Convert to goflow2 format and send through existing pipeline
+			gfMsg := sflow.ConvertToGoflowMessage(msg)
+
+			// Apply sampling upscaling if enabled
+			if !rctx.cli.DisableUpscaling && msg.SamplingRate > 1 {
+				gfMsg.Bytes *= uint64(msg.SamplingRate)
+				gfMsg.Packets *= uint64(msg.SamplingRate)
+			}
+
+			// Format and send
+			key, data, err := formatter.Format(gfMsg)
+			if err != nil {
+				return err
+			}
+			return transporter.Send(key, data)
+		}
+
+		sflowCollector = sflow.NewSFlowCollector(&sflow.SFlowCollectorConfig{
+			ListenAddr:      sflowIP,
+			ListenPort:      sflowPort,
+			NumWorkers:      rctx.cli.SFlowWorkers,
+			QueueSize:       rctx.cli.QueueSize,
+			SamplingTracker: samplingTracker,
+			FlowHandler:     sflowHandler,
+			Metrics:         sflow.NewSFlowMetrics(METRICS_NAMESPACE),
+			PoolMetrics:     collector.NewPoolMetrics(METRICS_NAMESPACE + "_sflow"),
+		})
+
+		if err := sflowCollector.Start(); err != nil {
+			log.WithError(err).Fatal("Error starting sFlow collector")
+		}
+
+		log.WithFields(logrus.Fields{
+			"addr": sflowIP,
+			"port": sflowPort,
+		}).Info("sFlow collector started")
+	}
+
 	collecting = true
 
 	<-c
 
 	collecting = false
+
+	// Stop sFlow collector if running
+	if sflowCollector != nil {
+		if err := sflowCollector.Stop(); err != nil {
+			log.WithError(err).Error("Error stopping sFlow collector")
+		}
+	}
 
 	// stops receivers first, udp sockets will be down
 	_ = nfRecv.Stop()
@@ -343,6 +503,12 @@ func main() {
 	// close transporter (eg: flushes message to Kafka) ignore errors, we're exiting anyway
 	_ = transporter.Close()
 	log.Info("Transporter closed")
+
+	// Stop dedup cache cleanup
+	if dedupCache != nil {
+		dedupCache.Stop()
+	}
+
 	// close http server (prometheus + health check)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	if err := srv.Shutdown(ctx); err != nil {
@@ -361,4 +527,13 @@ func PrintVersion() {
 	}
 	fmt.Printf("netflow2ng v%s -- Copyright %s Aaron Turner\n", Version, COPYRIGHT_YEAR)
 	fmt.Printf("%s (%s)%s built at %s\n", CommitID, Tag, delta, Buildinfos)
+	fmt.Println("\nProtocol Support:")
+	fmt.Println("  - NetFlow v9")
+	fmt.Println("  - IPFIX (NetFlow v10)")
+	fmt.Println("  - sFlow v5")
+	fmt.Println("\nFeatures:")
+	fmt.Println("  - Multi-endpoint ZMQ fan-out (hash/round-robin)")
+	fmt.Println("  - Per-exporter sampling rate tracking and upscaling")
+	fmt.Println("  - Flow deduplication with configurable TTL")
+	fmt.Println("  - High-throughput worker pool architecture")
 }
