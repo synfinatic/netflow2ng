@@ -115,12 +115,25 @@ func (d *NtopngTlv) toTLV(extFlow *proto.ExtendedFlowMessage) ([]byte, error) {
 	// Stats + direction
 	// goflow2 only supports unidirectional flows. There is no Direction field and only one
 	// Bytes/Packets field. Data flow is always Src -> Dst
+	//
+	// For NetFlow v9/IPFIX, bytes/packets arrive via the mapping.yaml remapping into the
+	// custom ExtendedFlowMessage fields (200-203). For NetFlow v5 (fixed format), the
+	// producer bypasses that remapping and writes directly to FlowMessage.Bytes/Packets,
+	// so fall back to those when the custom fields are unpopulated.
+	inBytes := uint64(extFlow.InBytes)
+	if inBytes == 0 {
+		inBytes = baseFlow.Bytes
+	}
+	inPackets := uint64(extFlow.InPackets)
+	if inPackets == 0 {
+		inPackets = baseFlow.Packets
+	}
 	items = append(items,
 		ndpiItem{Key: netflow.NFV9_FIELD_DIRECTION, Value: 0},
-		ndpiItem{Key: netflow.NFV9_FIELD_IN_BYTES, Value: extFlow.InBytes},
-		ndpiItem{Key: netflow.NFV9_FIELD_IN_PKTS, Value: extFlow.InPackets},
-		ndpiItem{Key: netflow.NFV9_FIELD_OUT_BYTES, Value: extFlow.OutBytes},
-		ndpiItem{Key: netflow.NFV9_FIELD_OUT_PKTS, Value: extFlow.OutPackets},
+		ndpiItem{Key: netflow.NFV9_FIELD_IN_BYTES, Value: inBytes},
+		ndpiItem{Key: netflow.NFV9_FIELD_IN_PKTS, Value: inPackets},
+		ndpiItem{Key: netflow.NFV9_FIELD_OUT_BYTES, Value: uint64(extFlow.OutBytes)},
+		ndpiItem{Key: netflow.NFV9_FIELD_OUT_PKTS, Value: uint64(extFlow.OutPackets)},
 	)
 	// Goflow2 protobuf provides time in ns, but it ntopng expects time in seconds.
 	items = append(items,
