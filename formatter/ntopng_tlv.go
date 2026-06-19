@@ -121,6 +121,7 @@ func (d *NtopngTlv) toTLV(extFlow *proto.ExtendedFlowMessage) ([]byte, error) {
 		ndpiItem{Key: netflow.NFV9_FIELD_IN_PKTS, Value: extFlow.InPackets},
 		ndpiItem{Key: netflow.NFV9_FIELD_OUT_BYTES, Value: extFlow.OutBytes},
 		ndpiItem{Key: netflow.NFV9_FIELD_OUT_PKTS, Value: extFlow.OutPackets},
+		ndpiItem{Key: netflow.NFV9_FIELD_SAMPLING_INTERVAL, Value: baseFlow.SamplingRate},
 	)
 	// Goflow2 protobuf provides time in ns. Send both NFv9 (seconds) and IPFIX (milliseconds)
 	// fields for maximum compatibility with ntopng.
@@ -145,6 +146,7 @@ func (d *NtopngTlv) toTLV(extFlow *proto.ExtendedFlowMessage) ([]byte, error) {
 		// Network
 		ndpiItem{Key: netflow.NFV9_FIELD_SRC_AS, Value: baseFlow.SrcAs},
 		ndpiItem{Key: netflow.NFV9_FIELD_DST_AS, Value: baseFlow.DstAs},
+		ndpiItem{Key: netflow.IPFIX_FIELD_bgpNextAdjacentAsNumber, Value: baseFlow.NextHopAs},
 
 		// Interfaces
 		ndpiItem{Key: netflow.NFV9_FIELD_INPUT_SNMP, Value: baseFlow.InIf},
@@ -153,6 +155,7 @@ func (d *NtopngTlv) toTLV(extFlow *proto.ExtendedFlowMessage) ([]byte, error) {
 		ndpiItem{Key: netflow.NFV9_FIELD_SRC_TOS, Value: baseFlow.IpTos},
 		ndpiItem{Key: netflow.NFV9_FIELD_TCP_FLAGS, Value: baseFlow.TcpFlags},
 		ndpiItem{Key: netflow.NFV9_FIELD_MIN_TTL, Value: baseFlow.IpTtl},
+		ndpiItem{Key: netflow.IPFIX_FIELD_fragmentFlags, Value: baseFlow.IpFlags},
 	)
 
 	// IP
@@ -164,8 +167,8 @@ func (d *NtopngTlv) toTLV(extFlow *proto.ExtendedFlowMessage) ([]byte, error) {
 			ndpiItem{Key: netflow.NFV9_FIELD_IPV4_DST_PREFIX, Value: baseFlow.DstNet},
 			ndpiItem{Key: netflow.NFV9_FIELD_IPV4_IDENT, Value: baseFlow.FragmentId},
 			ndpiItem{Key: netflow.NFV9_FIELD_FRAGMENT_OFFSET, Value: baseFlow.FragmentOffset},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_SRC_MASK, Value: baseFlow.SrcNet},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_DST_MASK, Value: baseFlow.DstNet},
+			ndpiItem{Key: netflow.NFV9_FIELD_SRC_MASK, Value: baseFlow.SrcNet},
+			ndpiItem{Key: netflow.NFV9_FIELD_DST_MASK, Value: baseFlow.DstNet},
 		)
 		copy(ip4, baseFlow.SrcAddr)
 		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV4_SRC_ADDR, Value: ip4.String()})
@@ -220,6 +223,12 @@ func (d *NtopngTlv) toTLV(extFlow *proto.ExtendedFlowMessage) ([]byte, error) {
 		copy(ip6, baseFlow.SamplerAddress)
 		items = append(items, ndpiItem{Key: netflow.IPFIX_FIELD_exporterIPv6Address, Value: ip6.String()})
 	}
+
+	// Observation metadata
+	items = append(items,
+		ndpiItem{Key: netflow.IPFIX_FIELD_observationDomainId, Value: baseFlow.ObservationDomainId},
+		ndpiItem{Key: netflow.IPFIX_FIELD_observationPointId, Value: baseFlow.ObservationPointId},
+	)
 
 	// Serialize and make a flow record.
 	tlvbuf, err := serializeTlvRecord(items)

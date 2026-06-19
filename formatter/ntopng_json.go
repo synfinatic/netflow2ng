@@ -64,6 +64,7 @@ func (d *NtopngJson) toJSON(extFlow *proto.ExtendedFlowMessage) ([]byte, error) 
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_IN_PKTS)] = extFlow.InPackets
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_OUT_BYTES)] = extFlow.OutBytes
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_OUT_PKTS)] = extFlow.OutPackets
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_SAMPLING_INTERVAL)] = baseFlow.SamplingRate
 	// Goflow2 protobuf provides time in ns. Send both NFv9 (seconds) and IPFIX (milliseconds)
 	// fields for maximum compatibility with ntopng.
 	// NetFlow v9 fields (seconds precision)
@@ -85,6 +86,7 @@ func (d *NtopngJson) toJSON(extFlow *proto.ExtendedFlowMessage) ([]byte, error) 
 	// Network
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_SRC_AS)] = baseFlow.SrcAs
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_DST_AS)] = baseFlow.DstAs
+	retmap[strconv.Itoa(netflow.IPFIX_FIELD_bgpNextAdjacentAsNumber)] = baseFlow.NextHopAs
 
 	// Interfaces
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_INPUT_SNMP)] = baseFlow.InIf
@@ -93,6 +95,7 @@ func (d *NtopngJson) toJSON(extFlow *proto.ExtendedFlowMessage) ([]byte, error) 
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_SRC_TOS)] = baseFlow.IpTos
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_TCP_FLAGS)] = baseFlow.TcpFlags
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_MIN_TTL)] = baseFlow.IpTtl
+	retmap[strconv.Itoa(netflow.IPFIX_FIELD_fragmentFlags)] = baseFlow.IpFlags
 
 	// IP
 	if baseFlow.Etype == 0x800 {
@@ -108,8 +111,8 @@ func (d *NtopngJson) toJSON(extFlow *proto.ExtendedFlowMessage) ([]byte, error) 
 		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV4_NEXT_HOP)] = ip4.String()
 		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV4_IDENT)] = baseFlow.FragmentId
 		retmap[strconv.Itoa(netflow.NFV9_FIELD_FRAGMENT_OFFSET)] = baseFlow.FragmentOffset
-		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_SRC_MASK)] = baseFlow.SrcNet
-		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_DST_MASK)] = baseFlow.DstNet
+		retmap[strconv.Itoa(netflow.NFV9_FIELD_SRC_MASK)] = baseFlow.SrcNet
+		retmap[strconv.Itoa(netflow.NFV9_FIELD_DST_MASK)] = baseFlow.DstNet
 	} else {
 		// 0x86dd IPv6
 		retmap[strconv.Itoa(netflow.NFV9_FIELD_IP_PROTOCOL_VERSION)] = 6
@@ -152,6 +155,10 @@ func (d *NtopngJson) toJSON(extFlow *proto.ExtendedFlowMessage) ([]byte, error) 
 		copy(ip6, baseFlow.SamplerAddress)
 		retmap[strconv.Itoa(netflow.IPFIX_FIELD_exporterIPv6Address)] = ip6.String()
 	}
+
+	// Observation metadata
+	retmap[strconv.Itoa(netflow.IPFIX_FIELD_observationDomainId)] = baseFlow.ObservationDomainId
+	retmap[strconv.Itoa(netflow.IPFIX_FIELD_observationPointId)] = baseFlow.ObservationPointId
 
 	// convert to JSON
 	return json.Marshal(retmap)
