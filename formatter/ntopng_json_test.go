@@ -191,9 +191,7 @@ func TestNtopngJson_toJSON_MAC(t *testing.T) {
 	m := decodeJSON(t, data)
 
 	// Verify MAC fields are present and are non-empty MAC address strings.
-	// The encoding uses binary.PutUvarint (varint) so the byte order differs from
-	// big-endian. The test verifies the encoding is stable (same uint64 → same string)
-	// and the format matches a MAC address pattern (XX:XX:XX:XX:XX:XX).
+	// Encoding uses binary.BigEndian.PutUint64 into [8]byte, then copies the low 6 bytes.
 	srcMac, ok := m[fieldKey(netflow.NFV9_FIELD_OUT_SRC_MAC)].(string)
 	if !ok || srcMac == "" {
 		t.Errorf("expected non-empty srcMac string, got %v", m[fieldKey(netflow.NFV9_FIELD_OUT_SRC_MAC)])
@@ -206,9 +204,13 @@ func TestNtopngJson_toJSON_MAC(t *testing.T) {
 		t.Errorf("expected srcMac != dstMac, both were %q", srcMac)
 	}
 
-	// Verify the expected varint-encoded output for known inputs (SrcMac=0x001122334455).
-	if srcMac != "d5:88:cd:91:92:02" {
-		t.Errorf("srcMac encoding changed: expected d5:88:cd:91:92:02, got %q", srcMac)
+	// SrcMac=0x001122334455 → BigEndian 8 bytes [00 00 00 11 22 33 44 55], low 6 = 00:11:22:33:44:55
+	if srcMac != "00:11:22:33:44:55" {
+		t.Errorf("srcMac BigEndian encoding wrong: expected 00:11:22:33:44:55, got %q", srcMac)
+	}
+	// DstMac=0x665544332211 → BigEndian 8 bytes [00 00 66 55 44 33 22 11], low 6 = 66:55:44:33:22:11
+	if dstMac != "66:55:44:33:22:11" {
+		t.Errorf("dstMac BigEndian encoding wrong: expected 66:55:44:33:22:11, got %q", dstMac)
 	}
 }
 

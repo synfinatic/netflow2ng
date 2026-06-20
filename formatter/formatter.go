@@ -103,7 +103,7 @@ func extractFlowData(extFlow *proto.ExtendedFlowMessage) flowData {
 	ip6 := make(net.IP, net.IPv6len)
 	ip4 := make(net.IP, net.IPv4len)
 	hwaddr := make(net.HardwareAddr, 6)
-	_hwaddr := make([]byte, binary.MaxVarintLen64)
+	var mac8 [8]byte
 
 	fd := flowData{}
 
@@ -129,16 +129,12 @@ func extractFlowData(extFlow *proto.ExtendedFlowMessage) flowData {
 	// ICMP combined type+code
 	fd.icmpType = uint16((uint16(baseFlow.IcmpType) << 8) + uint16(baseFlow.IcmpCode))
 
-	// MAC addresses
-	binary.PutUvarint(_hwaddr, baseFlow.DstMac)
-	for i := 0; i < 6; i++ {
-		hwaddr[i] = _hwaddr[i]
-	}
+	// MAC — BigEndian encodes as 8 bytes; MAC occupies the low 6 bytes (indices 2–7)
+	binary.BigEndian.PutUint64(mac8[:], baseFlow.DstMac)
+	copy(hwaddr, mac8[2:])
 	fd.dstMac = hwaddr.String()
-	binary.PutUvarint(_hwaddr, baseFlow.SrcMac)
-	for i := 0; i < 6; i++ {
-		hwaddr[i] = _hwaddr[i]
-	}
+	binary.BigEndian.PutUint64(mac8[:], baseFlow.SrcMac)
+	copy(hwaddr, mac8[2:])
 	fd.srcMac = hwaddr.String()
 
 	// VLAN

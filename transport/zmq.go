@@ -123,7 +123,8 @@ func (d *ZmqDriver) Send(key, data []byte) error {
 		log.Info("Sending first ZMQ message.")
 	} else if d.messageId%1000 == 0 {
 		log.Debugf("Sending ZMQ message id %d.", d.messageId)
-	} else if d.messageId >= maxMessageId {
+	}
+	if d.messageId >= maxMessageId {
 		log.Debug("Wrapping message id back to 1 to avoid overflow")
 		d.messageId = 1
 	}

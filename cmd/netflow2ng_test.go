@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	localtransport "github.com/synfinatic/netflow2ng/transport"
@@ -260,7 +261,7 @@ func TestSelectFormat_Unknown(t *testing.T) {
 // --- newHealthHandler ---
 
 func TestNewHealthHandler_NotCollecting(t *testing.T) {
-	collecting := false
+	var collecting atomic.Bool // zero value = false
 	handler := newHealthHandler(&collecting)
 
 	req := httptest.NewRequest(http.MethodGet, "/__health", nil)
@@ -276,7 +277,8 @@ func TestNewHealthHandler_NotCollecting(t *testing.T) {
 }
 
 func TestNewHealthHandler_Collecting(t *testing.T) {
-	collecting := true
+	var collecting atomic.Bool
+	collecting.Store(true)
 	handler := newHealthHandler(&collecting)
 
 	req := httptest.NewRequest(http.MethodGet, "/__health", nil)
@@ -331,7 +333,7 @@ func (f *failWriteRecorder) Write(_ []byte) (int, error) {
 }
 
 func TestNewHealthHandler_WriteError_NotCollecting(t *testing.T) {
-	collecting := false
+	var collecting atomic.Bool // zero value = false
 	handler := newHealthHandler(&collecting)
 	req := httptest.NewRequest(http.MethodGet, "/__health", nil)
 	rr := &failWriteRecorder{ResponseRecorder: httptest.NewRecorder()}
@@ -339,7 +341,8 @@ func TestNewHealthHandler_WriteError_NotCollecting(t *testing.T) {
 }
 
 func TestNewHealthHandler_WriteError_Collecting(t *testing.T) {
-	collecting := true
+	var collecting atomic.Bool
+	collecting.Store(true)
 	handler := newHealthHandler(&collecting)
 	req := httptest.NewRequest(http.MethodGet, "/__health", nil)
 	rr := &failWriteRecorder{ResponseRecorder: httptest.NewRecorder()}

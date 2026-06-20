@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -67,8 +68,8 @@ func (a *Address) Value() (string, int, error) {
 	if len(listen) != 2 {
 		return "", 0, fmt.Errorf("invalid address format (expected host:port): %s", string(*a))
 	}
-	port, err := strconv.ParseInt(listen[1], 10, 16)
-	if err != nil {
+	port, err := strconv.ParseInt(listen[1], 10, 32)
+	if err != nil || port < 1 || port > 65535 {
 		return "", 0, fmt.Errorf("unable to parse port in address: %s", string(*a))
 	}
 	return listen[0], int(port), nil
@@ -144,7 +145,9 @@ func selectFormat(formatStr string, l *logrus.Logger) (localtransport.MsgFormat,
 		if f, err = format.FindFormat("ntopjson"); err != nil {
 			return 0, nil, false, fmt.Errorf("avail formatters: %v: %w", format.GetFormats(), err)
 		}
-		l.Info("Using ntopng JSON format for ZMQ")
+		if !compress {
+			l.Info("Using ntopng JSON format for ZMQ")
+		}
 	default:
 		return 0, nil, false, fmt.Errorf("unknown output format: %s", formatStr)
 	}
@@ -153,9 +156,9 @@ func selectFormat(formatStr string, l *logrus.Logger) (localtransport.MsgFormat,
 }
 
 // newHealthHandler returns an HTTP handler for the /__health endpoint.
-func newHealthHandler(collecting *bool) http.HandlerFunc {
+func newHealthHandler(collecting *atomic.Bool) http.HandlerFunc {
 	return func(wr http.ResponseWriter, r *http.Request) {
-		if !*collecting {
+		if !collecting.Load() {
 			wr.WriteHeader(http.StatusServiceUnavailable)
 			if _, err := wr.Write([]byte("Not OK\n")); err != nil {
 				log.Error("error writing HTTP: ", err)
@@ -257,7 +260,7 @@ func main() {
 
 	wg := &sync.WaitGroup{}
 
-	var collecting bool
+	var collecting atomic.Bool
 	// Note that goflow2 doesn't yet support a /templates endpoint. We probably should add that.
 	http.Handle("/metrics", promhttp.Handler())
 	http.HandleFunc("/__health", newHealthHandler(&collecting))
@@ -361,11 +364,11 @@ func main() {
 		}()
 	}
 
-	collecting = true
+	collecting.Store(true)
 
 	<-c
 
-	collecting = false
+	collecting.Store(false)
 
 	// stops receivers first, udp sockets will be down
 	_ = nfRecv.Stop()
