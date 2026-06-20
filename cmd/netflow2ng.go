@@ -62,15 +62,16 @@ func (s *SourceId) Validate() error {
 
 type Address string
 
-func (a *Address) Value() (string, int) {
-	var port int64
-	var err error
-
+func (a *Address) Value() (string, int, error) {
 	listen := strings.SplitN(string(*a), ":", 2)
-	if port, err = strconv.ParseInt(listen[1], 10, 16); err != nil {
-		log.Fatalf("Unable to parse: --listen %s", string(*a))
+	if len(listen) != 2 {
+		return "", 0, fmt.Errorf("invalid address format (expected host:port): %s", string(*a))
 	}
-	return listen[0], int(port)
+	port, err := strconv.ParseInt(listen[1], 10, 16)
+	if err != nil {
+		return "", 0, fmt.Errorf("unable to parse port in address: %s", string(*a))
+	}
+	return listen[0], int(port), nil
 }
 
 type CLI struct {
@@ -96,6 +97,96 @@ func LoadMappingYaml() (*protoproducer.ProducerConfig, error) {
 	dec := yaml.NewDecoder(strings.NewReader(localformatters.MappingYaml))
 	err := dec.Decode(config)
 	return config, err
+}
+
+// templateSource is the interface for retrieving NetFlow templates (satisfied by *utils.NetFlowPipe).
+type templateSource interface {
+	GetTemplatesForAllSources() map[string]map[uint64]interface{}
+}
+
+// setupLogging configures the logger level and format, and propagates it to sub-packages.
+func setupLogging(logFormat, logLevel string, l *logrus.Logger) {
+	lvl, _ := logrus.ParseLevel(logLevel)
+	switch logFormat {
+	case "json":
+		l.SetFormatter(&logrus.JSONFormatter{})
+	case "default":
+		l.Debugf("Using default log style")
+	}
+	l.SetLevel(lvl)
+	localformatters.SetLogger(l)
+	localtransport.SetLogger(l)
+}
+
+// selectFormat returns the MsgFormat, registered formatter, compress flag, and any error.
+// Returns an error instead of calling log.Fatal so callers can handle it in tests.
+func selectFormat(formatStr string, l *logrus.Logger) (localtransport.MsgFormat, *format.Format, bool, error) {
+	var msgType localtransport.MsgFormat
+	var f *format.Format
+	var err error
+	compress := false
+
+	switch formatStr {
+	case "tlv":
+		msgType = localtransport.TLV
+		if f, err = format.FindFormat("ntoptlv"); err != nil {
+			return 0, nil, false, fmt.Errorf("avail formatters: %v: %w", format.GetFormats(), err)
+		}
+		l.Info("Using ntopng TLV format for ZMQ")
+	case "proto", "protobuf":
+		return localtransport.PBUF, nil, false, errors.New("protobuf not yet supported with goflow2")
+	case "jcompress":
+		compress = true
+		l.Info("Using ntopng compressed JSON format for ZMQ")
+		fallthrough
+	case "json":
+		msgType = localtransport.JSON
+		if f, err = format.FindFormat("ntopjson"); err != nil {
+			return 0, nil, false, fmt.Errorf("avail formatters: %v: %w", format.GetFormats(), err)
+		}
+		l.Info("Using ntopng JSON format for ZMQ")
+	default:
+		return 0, nil, false, fmt.Errorf("unknown output format: %s", formatStr)
+	}
+
+	return msgType, f, compress, nil
+}
+
+// newHealthHandler returns an HTTP handler for the /__health endpoint.
+func newHealthHandler(collecting *bool) http.HandlerFunc {
+	return func(wr http.ResponseWriter, r *http.Request) {
+		if !*collecting {
+			wr.WriteHeader(http.StatusServiceUnavailable)
+			if _, err := wr.Write([]byte("Not OK\n")); err != nil {
+				log.Error("error writing HTTP: ", err)
+			}
+		} else {
+			wr.WriteHeader(http.StatusOK)
+			if _, err := wr.Write([]byte("OK\n")); err != nil {
+				log.Error("error writing HTTP: ", err)
+			}
+		}
+	}
+}
+
+// newTemplatesHandler returns an HTTP handler for the /templates endpoint.
+func newTemplatesHandler(ts templateSource) http.HandlerFunc {
+	return func(wr http.ResponseWriter, r *http.Request) {
+		templates := ts.GetTemplatesForAllSources()
+		if body, err := json.MarshalIndent(templates, "", "  "); err != nil {
+			log.Error("error writing JSON body for /templates", err)
+			wr.WriteHeader(http.StatusInternalServerError)
+			if _, err := wr.Write([]byte("Internal Server Error\n")); err != nil {
+				log.Error("error writing HTTP", err)
+			}
+		} else {
+			wr.Header().Add("Content-Type", "application/json")
+			wr.WriteHeader(http.StatusOK)
+			if _, err := wr.Write(body); err != nil {
+				log.Error("error writing HTTP", err)
+			}
+		}
+	}
 }
 
 // This entire main() is heavily based on cmd/main.go from netsampler/goflow2.
@@ -124,45 +215,11 @@ func main() {
 		os.Exit(0)
 	}
 
-	lvl, _ := logrus.ParseLevel(rctx.cli.LogLevel)
-	switch rctx.cli.LogFormat {
-	case "json":
-		log.SetFormatter(&logrus.JSONFormatter{})
-	case "default":
-		log.Debugf("Using default log style")
-	}
+	setupLogging(rctx.cli.LogFormat, rctx.cli.LogLevel, log)
 
-	log.SetLevel(lvl)
-	localformatters.SetLogger(log)
-	localtransport.SetLogger(log)
-
-	var msgType localtransport.MsgFormat
-	var formatter *format.Format
-
-	compress := false // For now, only compressing JSON.
-
-	switch rctx.cli.Format {
-	case "tlv":
-		msgType = localtransport.TLV
-		formatter, err = format.FindFormat("ntoptlv")
-		log.Info("Using ntopng TLV format for ZMQ")
-	case "protobuf":
-		msgType = localtransport.PBUF
-		log.Fatal("Protobuf not yet supported with goflow2")
-	case "jcompress":
-		compress = true
-		log.Info("Using ntopng compressed JSON format for ZMQ")
-		fallthrough
-	case "json":
-		msgType = localtransport.JSON
-		formatter, err = format.FindFormat("ntopjson")
-		log.Info("Using ntopng JSON format for ZMQ")
-	default:
-		log.Fatal("Unknown output format")
-	}
-
+	msgType, formatter, compress, err := selectFormat(rctx.cli.Format, log)
 	if err != nil {
-		log.Fatal("Avail formatters:", format.GetFormats(), err)
+		log.Fatal(err)
 	}
 
 	localtransport.RegisterZmq(rctx.cli.ListenZmq, msgType, int(rctx.cli.SourceId), compress)
@@ -203,20 +260,7 @@ func main() {
 	var collecting bool
 	// Note that goflow2 doesn't yet support a /templates endpoint. We probably should add that.
 	http.Handle("/metrics", promhttp.Handler())
-	http.HandleFunc("/__health", func(wr http.ResponseWriter, r *http.Request) {
-		if !collecting {
-			wr.WriteHeader(http.StatusServiceUnavailable)
-			if _, err := wr.Write([]byte("Not OK\n")); err != nil {
-				log.Error("error writing HTTP: ", err)
-			}
-		} else {
-			wr.WriteHeader(http.StatusOK)
-			if _, err := wr.Write([]byte("OK\n")); err != nil {
-				log.Error("error writing HTTP: ", err)
-
-			}
-		}
-	})
+	http.HandleFunc("/__health", newHealthHandler(&collecting))
 	srv := http.Server{
 		Addr:              string(rctx.cli.Metrics),
 		ReadHeaderTimeout: time.Second * 5,
@@ -237,7 +281,10 @@ func main() {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	q := make(chan bool)
 
-	Nfv9Ip, Nfv9Port := rctx.cli.Listen.Value()
+	Nfv9Ip, Nfv9Port, err := rctx.cli.Listen.Value()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Goflow2 UDPReceiver config allows for more complexity, we're just using one socket and however many
 	// workers were on the command-line.
@@ -270,22 +317,7 @@ func main() {
 	var decodeFunc utils.DecoderFunc
 	nfPipe := utils.NewNetFlowPipe(cfgPipe)
 
-	http.HandleFunc("/templates", func(wr http.ResponseWriter, r *http.Request) {
-		templates := nfPipe.GetTemplatesForAllSources()
-		if body, err := json.MarshalIndent(templates, "", "  "); err != nil {
-			log.Error("error writing JSON body for /templates", err)
-			wr.WriteHeader(http.StatusInternalServerError)
-			if _, err := wr.Write([]byte("Internal Server Error\n")); err != nil {
-				log.Error("error writing HTTP", err)
-			}
-		} else {
-			wr.Header().Add("Content-Type", "application/json")
-			wr.WriteHeader(http.StatusOK)
-			if _, err := wr.Write(body); err != nil {
-				log.Error("error writing HTTP", err)
-			}
-		}
-	})
+	http.HandleFunc("/templates", newTemplatesHandler(nfPipe))
 
 	decodeFunc = nfPipe.DecodeFlow
 	// intercept panic and generate error
