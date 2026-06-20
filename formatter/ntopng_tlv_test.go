@@ -450,7 +450,7 @@ func TestZlibRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("zlib reader error: %v", err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	decompressed, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatalf("read error: %v", err)

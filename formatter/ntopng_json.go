@@ -26,7 +26,7 @@ func (d *NtopngJson) Format(data interface{}) ([]byte, []byte, error) {
 	var key []byte
 	if dataIf, ok := data.(interface{ Key() []byte }); ok {
 		func() {
-			defer func() { recover() }()
+			defer func() { _ = recover() }()
 			key = dataIf.Key()
 		}()
 	}

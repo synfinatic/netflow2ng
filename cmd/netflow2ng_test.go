@@ -155,7 +155,9 @@ func TestPrintVersion(t *testing.T) {
 
 	PrintVersion()
 
-	w.Close()
+	if err := w.Close(); err != nil {
+		t.Fatalf("pipe close error: %v", err)
+	}
 	os.Stdout = orig
 
 	var buf bytes.Buffer
@@ -194,11 +196,15 @@ func TestPrintVersion_WithDelta(t *testing.T) {
 
 	PrintVersion()
 
-	w.Close()
+	if err := w.Close(); err != nil {
+		t.Fatalf("pipe close error: %v", err)
+	}
 	os.Stdout = orig
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("io.Copy error: %v", err)
+	}
 	output := buf.String()
 
 	if !strings.Contains(output, "5 files delta") {

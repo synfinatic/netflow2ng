@@ -252,7 +252,7 @@ func TestCompressJSON_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("zlib.NewReader error: %v", err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	decompressed, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatalf("read error: %v", err)
@@ -325,7 +325,7 @@ func TestZmqDriver_InitAndSend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create SUB socket: %v", err)
 	}
-	defer sub.Close()
+	defer func() { _ = sub.Close() }()
 	if err := sub.Connect(testZmqAddr); err != nil {
 		t.Fatalf("failed to connect subscriber: %v", err)
 	}
@@ -346,7 +346,9 @@ func TestZmqDriver_InitAndSend(t *testing.T) {
 	}
 
 	// Receive both frames of the multi-part message (header + payload).
-	sub.SetRcvtimeo(2 * time.Second)
+	if err := sub.SetRcvtimeo(2 * time.Second); err != nil {
+		t.Fatalf("SetRcvtimeo error: %v", err)
+	}
 	header, err := sub.RecvBytes(0)
 	if err != nil {
 		t.Fatalf("failed to receive header frame: %v", err)
@@ -382,11 +384,17 @@ func TestZmqDriver_Send_MessageIdLogging(t *testing.T) {
 
 	subCtx, _ := zmq.NewContext()
 	sub, _ := subCtx.NewSocket(zmq.SUB)
-	defer sub.Close()
-	sub.Connect(addr)
-	sub.SetSubscribe("")
+	defer func() { _ = sub.Close() }()
+	if err := sub.Connect(addr); err != nil {
+		t.Fatalf("failed to connect subscriber: %v", err)
+	}
+	if err := sub.SetSubscribe(""); err != nil {
+		t.Fatalf("SetSubscribe error: %v", err)
+	}
 
-	d.Init()
+	if err := d.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
 
 	// Send with messageId=1 (first message log path)
 	if err := d.Send(nil, []byte("hello")); err != nil {
@@ -417,10 +425,16 @@ func TestZmqDriver_Send_PBUF(t *testing.T) {
 
 	subCtx, _ := zmq.NewContext()
 	sub, _ := subCtx.NewSocket(zmq.SUB)
-	defer sub.Close()
-	sub.Connect(addr)
-	sub.SetSubscribe("")
-	d.Init()
+	defer func() { _ = sub.Close() }()
+	if err := sub.Connect(addr); err != nil {
+		t.Fatalf("failed to connect subscriber: %v", err)
+	}
+	if err := sub.SetSubscribe(""); err != nil {
+		t.Fatalf("SetSubscribe error: %v", err)
+	}
+	if err := d.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
 
 	if err := d.Send(nil, []byte{0xde, 0xad, 0xbe, 0xef}); err != nil {
 		t.Fatalf("Send() PBUF error: %v", err)
@@ -445,10 +459,16 @@ func TestZmqDriver_Send_MsgIdWrap(t *testing.T) {
 
 	subCtx, _ := zmq.NewContext()
 	sub, _ := subCtx.NewSocket(zmq.SUB)
-	defer sub.Close()
-	sub.Connect(addr)
-	sub.SetSubscribe("")
-	d.Init()
+	defer func() { _ = sub.Close() }()
+	if err := sub.Connect(addr); err != nil {
+		t.Fatalf("failed to connect subscriber: %v", err)
+	}
+	if err := sub.SetSubscribe(""); err != nil {
+		t.Fatalf("SetSubscribe error: %v", err)
+	}
+	if err := d.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
 
 	if err := d.Send(nil, []byte{0x01, 0x01, 0x01}); err != nil {
 		t.Fatalf("Send() wrap error: %v", err)
@@ -475,20 +495,28 @@ func TestZmqDriver_Send_Compressed(t *testing.T) {
 
 	subCtx, _ := zmq.NewContext()
 	sub, _ := subCtx.NewSocket(zmq.SUB)
-	defer sub.Close()
-	sub.Connect(addr)
-	sub.SetSubscribe("")
+	defer func() { _ = sub.Close() }()
+	if err := sub.Connect(addr); err != nil {
+		t.Fatalf("failed to connect subscriber: %v", err)
+	}
+	if err := sub.SetSubscribe(""); err != nil {
+		t.Fatalf("SetSubscribe error: %v", err)
+	}
 
-	d.Init()
+	if err := d.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
 
 	testData := []byte(`{"src":"10.0.0.1","bytes":1000}`)
 	if err := d.Send(nil, testData); err != nil {
 		t.Fatalf("Send() compressed error: %v", err)
 	}
 
-	sub.SetRcvtimeo(2 * time.Second)
+	if err := sub.SetRcvtimeo(2 * time.Second); err != nil {
+		t.Fatalf("SetRcvtimeo error: %v", err)
+	}
 	// Receive header (skip)
-	sub.RecvBytes(0)
+	_, _ = sub.RecvBytes(0)
 	// Receive compressed payload
 	compressed, err := sub.RecvBytes(0)
 	if err != nil {
@@ -500,7 +528,9 @@ func TestZmqDriver_Send_Compressed(t *testing.T) {
 		t.Fatalf("zlib.NewReader error: %v", err)
 	}
 	decompressed, err := io.ReadAll(r)
-	r.Close()
+	if err := r.Close(); err != nil {
+		t.Fatalf("zlib close error: %v", err)
+	}
 	if err != nil {
 		t.Fatalf("decompression error: %v", err)
 	}
@@ -526,10 +556,16 @@ func TestZmqDriver_Send_UnknownMsgType(t *testing.T) {
 
 	subCtx, _ := zmq.NewContext()
 	sub, _ := subCtx.NewSocket(zmq.SUB)
-	defer sub.Close()
-	sub.Connect(addr)
-	sub.SetSubscribe("")
-	d.Init()
+	defer func() { _ = sub.Close() }()
+	if err := sub.Connect(addr); err != nil {
+		t.Fatalf("failed to connect subscriber: %v", err)
+	}
+	if err := sub.SetSubscribe(""); err != nil {
+		t.Fatalf("SetSubscribe error: %v", err)
+	}
+	if err := d.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
 
 	// Send should succeed even for unknown type (data is transmitted, default case just logs)
 	if err := d.Send(nil, []byte("test")); err != nil {
