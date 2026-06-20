@@ -388,6 +388,28 @@ func TestNtopngTlv_Format_Invalid(t *testing.T) {
 	}
 }
 
+// TestNtopngTlv_toTLV_MAC verifies that extractFlowData encodes MAC addresses correctly
+// via BigEndian in the TLV path. The bug was binary.PutUvarint producing wrong byte order.
+func TestNtopngTlv_toTLV_MAC(t *testing.T) {
+	d := &NtopngTlv{}
+	extFlow := newTestExtFlowIPv4()
+	b, err := d.toTLV(extFlow)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// MACs are serialized as strings in TLV. Verify expected strings appear in the raw output.
+	// SrcMac=0x001122334455 → BigEndian → "00:11:22:33:44:55"
+	// DstMac=0x665544332211 → BigEndian → "66:55:44:33:22:11"
+	raw := string(b)
+	if !bytes.Contains(b, []byte("00:11:22:33:44:55")) {
+		t.Errorf("expected srcMac '00:11:22:33:44:55' in TLV output; raw contains: %q", raw)
+	}
+	if !bytes.Contains(b, []byte("66:55:44:33:22:11")) {
+		t.Errorf("expected dstMac '66:55:44:33:22:11' in TLV output; raw contains: %q", raw)
+	}
+}
+
 // --- compressJSON (transport package exposes this via formatter test reach-through) ---
 // We test the zlib round-trip here since zlib is used in the TLV/JSON path.
 

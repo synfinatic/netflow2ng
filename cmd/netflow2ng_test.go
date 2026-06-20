@@ -85,6 +85,44 @@ func TestAddress_Value_InvalidPort(t *testing.T) {
 	}
 }
 
+// TestAddress_Value_HighPorts verifies ports above 32767 are accepted.
+// These were incorrectly rejected when ParseInt used bitSize=16 (max int16 = 32767).
+func TestAddress_Value_HighPorts(t *testing.T) {
+	cases := []struct {
+		addr     Address
+		wantPort int
+	}{
+		{"0.0.0.0:32768", 32768},
+		{"0.0.0.0:50000", 50000},
+		{"0.0.0.0:65535", 65535},
+	}
+	for _, c := range cases {
+		_, port, err := c.addr.Value()
+		if err != nil {
+			t.Errorf("Value(%q) returned unexpected error: %v (regression: bitSize=16 rejected ports > 32767)", c.addr, err)
+			continue
+		}
+		if port != c.wantPort {
+			t.Errorf("Value(%q): expected port %d, got %d", c.addr, c.wantPort, port)
+		}
+	}
+}
+
+// TestAddress_Value_OutOfRangePorts verifies port bounds enforcement (1–65535).
+func TestAddress_Value_OutOfRangePorts(t *testing.T) {
+	cases := []Address{
+		"0.0.0.0:0",     // port 0 not allowed
+		"0.0.0.0:65536", // one past max
+		"0.0.0.0:-1",    // negative
+	}
+	for _, a := range cases {
+		_, _, err := a.Value()
+		if err == nil {
+			t.Errorf("Value(%q) expected error for out-of-range port, got nil", a)
+		}
+	}
+}
+
 // --- LoadMappingYaml ---
 
 func TestLoadMappingYaml(t *testing.T) {
@@ -239,6 +277,55 @@ func TestSelectFormat_JCompress(t *testing.T) {
 	}
 	if !compress {
 		t.Error("expected compress=true for jcompress")
+	}
+}
+
+// TestSelectFormat_JCompress_SingleLog verifies that "jcompress" emits exactly one
+// log line. The bug was a fallthrough to the "json" case that unconditionally logged
+// "Using ntopng JSON format for ZMQ", causing two log lines for jcompress.
+func TestSelectFormat_JCompress_SingleLog(t *testing.T) {
+	var buf bytes.Buffer
+	l := logrus.New()
+	l.SetOutput(&buf)
+	l.SetLevel(logrus.InfoLevel)
+	l.SetFormatter(&logrus.TextFormatter{DisableTimestamp: true})
+
+	if _, _, _, err := selectFormat("jcompress", l); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if count := strings.Count(output, "ntopng"); count != 1 {
+		t.Errorf("expected exactly 1 log line mentioning ntopng for jcompress, got %d: %q", count, output)
+	}
+	// jcompress should log the compressed-format message but NOT the plain-JSON message
+	if !strings.Contains(output, "compressed") {
+		t.Errorf("jcompress log should mention 'compressed'; got: %q", output)
+	}
+	if strings.Contains(output, "Using ntopng JSON format for ZMQ") {
+		t.Errorf("jcompress should not log the plain 'JSON format for ZMQ' message; got: %q", output)
+	}
+}
+
+// TestSelectFormat_JSON_LogsMessage verifies that "json" format logs exactly the
+// "JSON format" message and not the "compressed" one.
+func TestSelectFormat_JSON_LogsMessage(t *testing.T) {
+	var buf bytes.Buffer
+	l := logrus.New()
+	l.SetOutput(&buf)
+	l.SetLevel(logrus.InfoLevel)
+	l.SetFormatter(&logrus.TextFormatter{DisableTimestamp: true})
+
+	if _, _, _, err := selectFormat("json", l); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "JSON format for ZMQ") {
+		t.Errorf("json format should log 'JSON format for ZMQ'; got: %q", output)
+	}
+	if strings.Contains(output, "compressed") {
+		t.Errorf("json format should not log anything about compression; got: %q", output)
 	}
 }
 

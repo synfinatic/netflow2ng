@@ -270,3 +270,40 @@ func TestExtractFlowData_IPv6Addresses(t *testing.T) {
 		t.Errorf("expected ipv6FlowLabel=12345, got %d", fd.ipv6FlowLabel)
 	}
 }
+
+// TestExtractFlowData_MAC verifies BigEndian MAC encoding in extractFlowData.
+// The bug was using binary.PutUvarint (LEB128 variable-length encoding) instead of
+// binary.BigEndian.PutUint64, producing wrong byte order for MAC addresses.
+func TestExtractFlowData_MAC(t *testing.T) {
+	extFlow := &proto.ExtendedFlowMessage{
+		BaseFlow: &pb.FlowMessage{
+			SrcMac: 0x001122334455, // BigEndian low-6 bytes → 00:11:22:33:44:55
+			DstMac: 0x665544332211, // BigEndian low-6 bytes → 66:55:44:33:22:11
+		},
+	}
+	fd := extractFlowData(extFlow)
+	if fd.srcMac != "00:11:22:33:44:55" {
+		t.Errorf("srcMac: expected 00:11:22:33:44:55, got %q (varint regression?)", fd.srcMac)
+	}
+	if fd.dstMac != "66:55:44:33:22:11" {
+		t.Errorf("dstMac: expected 66:55:44:33:22:11, got %q (varint regression?)", fd.dstMac)
+	}
+}
+
+// TestExtractFlowData_MAC_HighBits verifies MAC encoding when high bits are set in the
+// uint64 value — these produce the largest divergence between varint and BigEndian encoding.
+func TestExtractFlowData_MAC_HighBits(t *testing.T) {
+	extFlow := &proto.ExtendedFlowMessage{
+		BaseFlow: &pb.FlowMessage{
+			SrcMac: 0xAABBCCDDEEFF, // BigEndian low-6 → aa:bb:cc:dd:ee:ff
+			DstMac: 0xFF0000000001, // BigEndian low-6 → ff:00:00:00:00:01
+		},
+	}
+	fd := extractFlowData(extFlow)
+	if fd.srcMac != "aa:bb:cc:dd:ee:ff" {
+		t.Errorf("srcMac high-bits: expected aa:bb:cc:dd:ee:ff, got %q", fd.srcMac)
+	}
+	if fd.dstMac != "ff:00:00:00:00:01" {
+		t.Errorf("dstMac high-bits: expected ff:00:00:00:00:01, got %q", fd.dstMac)
+	}
+}
