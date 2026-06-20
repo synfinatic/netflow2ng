@@ -27,7 +27,7 @@ services:
       - netflow2ng
       - redis
     environment:
-      - TZ=PDT
+      - TZ=${TZ:-UTC}
     command: 
       - "--community"
       - "--redis"
