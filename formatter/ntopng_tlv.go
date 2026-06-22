@@ -32,7 +32,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"net"
+	"math"
 	"reflect"
 
 	"github.com/netsampler/goflow2/v2/decoders/netflow"
@@ -79,9 +79,14 @@ func (d *NtopngTlv) Init() error {
 
 func (d *NtopngTlv) Format(data interface{}) ([]byte, []byte, error) {
 	// The Transport might use "key", but we don't care about it here.
+	// Key() may panic if the ProtoProducerMessage was not initialized via the goflow2 producer
+	// pipeline (e.g., in tests); recover so that key stays nil and formatting continues.
 	var key []byte
 	if dataIf, ok := data.(interface{ Key() []byte }); ok {
-		key = dataIf.Key()
+		func() {
+			defer func() { _ = recover() }()
+			key = dataIf.Key()
+		}()
 	}
 
 	extFlowMsg, err := castToExtendedFlowMsg(data)
@@ -103,44 +108,21 @@ func (d *NtopngTlv) Format(data interface{}) ([]byte, []byte, error) {
  * using Formatter.MappingYamlStr
  */
 func (d *NtopngTlv) toTLV(extFlow *proto.ExtendedFlowMessage) ([]byte, error) {
-	ip6 := make(net.IP, net.IPv6len)
-	ip4 := make(net.IP, net.IPv4len)
-	hwaddr := make(net.HardwareAddr, 6)
-	_hwaddr := make([]byte, binary.MaxVarintLen64)
-	var icmp_type uint16
-	var items []ndpiItem
-	// goflow2 FlowMessage protobuf is embedded in ExtendedFlowMessage
+	fd := extractFlowData(extFlow)
 	baseFlow := extFlow.BaseFlow
+	var items []ndpiItem
 
 	// Stats + direction
-	// goflow2 only supports unidirectional flows. There is no Direction field and only one
-	// Bytes/Packets field. Data flow is always Src -> Dst
-	//
-	// For NetFlow v9/IPFIX, bytes/packets arrive via the mapping.yaml remapping into the
-	// custom ExtendedFlowMessage fields (200-203). For NetFlow v5 (fixed format), the
-	// producer bypasses that remapping and writes directly to FlowMessage.Bytes/Packets,
-	// so fall back to those when the custom fields are unpopulated.
-	inBytes := uint64(extFlow.InBytes)
-	if inBytes == 0 {
-		inBytes = baseFlow.Bytes
-	}
-	inPackets := uint64(extFlow.InPackets)
-	if inPackets == 0 {
-		inPackets = baseFlow.Packets
-	}
 	items = append(items,
 		ndpiItem{Key: netflow.NFV9_FIELD_DIRECTION, Value: 0},
-		ndpiItem{Key: netflow.NFV9_FIELD_IN_BYTES, Value: inBytes},
-		ndpiItem{Key: netflow.NFV9_FIELD_IN_PKTS, Value: inPackets},
-		ndpiItem{Key: netflow.NFV9_FIELD_OUT_BYTES, Value: uint64(extFlow.OutBytes)},
-		ndpiItem{Key: netflow.NFV9_FIELD_OUT_PKTS, Value: uint64(extFlow.OutPackets)},
+		ndpiItem{Key: netflow.NFV9_FIELD_IN_BYTES, Value: fd.inBytes},
+		ndpiItem{Key: netflow.NFV9_FIELD_IN_PKTS, Value: fd.inPackets},
+		ndpiItem{Key: netflow.NFV9_FIELD_OUT_BYTES, Value: fd.outBytes},
+		ndpiItem{Key: netflow.NFV9_FIELD_OUT_PKTS, Value: fd.outPackets},
 	)
-	// Goflow2 protobuf provides time in ns, but it ntopng expects time in seconds.
 	items = append(items,
-		ndpiItem{Key: netflow.NFV9_FIELD_FIRST_SWITCHED,
-			Value: uint32(baseFlow.TimeFlowStartNs / 1_000_000_000)},
-		ndpiItem{Key: netflow.NFV9_FIELD_LAST_SWITCHED,
-			Value: uint32(baseFlow.TimeFlowEndNs / 1_000_000_000)},
+		ndpiItem{Key: netflow.NFV9_FIELD_FIRST_SWITCHED, Value: fd.startSec},
+		ndpiItem{Key: netflow.NFV9_FIELD_LAST_SWITCHED, Value: fd.endSec},
 	)
 
 	items = append(items,
@@ -162,69 +144,47 @@ func (d *NtopngTlv) toTLV(extFlow *proto.ExtendedFlowMessage) ([]byte, error) {
 	)
 
 	// IP
-	if baseFlow.Etype == 0x800 {
-		// IPv4
+	if fd.isIPv4 {
 		items = append(items,
 			ndpiItem{Key: netflow.NFV9_FIELD_IP_PROTOCOL_VERSION, Value: 4},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV4_SRC_PREFIX, Value: baseFlow.SrcNet},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV4_DST_PREFIX, Value: baseFlow.DstNet},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV4_IDENT, Value: baseFlow.FragmentId},
-			ndpiItem{Key: netflow.NFV9_FIELD_FRAGMENT_OFFSET, Value: baseFlow.FragmentOffset},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_SRC_MASK, Value: baseFlow.SrcNet},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_DST_MASK, Value: baseFlow.DstNet},
+			ndpiItem{Key: netflow.NFV9_FIELD_IPV4_SRC_PREFIX, Value: fd.srcNet},
+			ndpiItem{Key: netflow.NFV9_FIELD_IPV4_DST_PREFIX, Value: fd.dstNet},
+			ndpiItem{Key: netflow.NFV9_FIELD_IPV4_IDENT, Value: fd.fragmentId},
+			ndpiItem{Key: netflow.NFV9_FIELD_FRAGMENT_OFFSET, Value: fd.fragmentOffset},
+			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_SRC_MASK, Value: fd.srcNet},
+			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_DST_MASK, Value: fd.dstNet},
 		)
-		copy(ip4, baseFlow.SrcAddr)
-		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV4_SRC_ADDR, Value: ip4.String()})
-		copy(ip4, baseFlow.DstAddr)
-		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV4_DST_ADDR, Value: ip4.String()})
-		copy(ip4, baseFlow.NextHop)
-		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV4_NEXT_HOP, Value: ip4.String()})
-
+		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV4_SRC_ADDR, Value: fd.srcIP})
+		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV4_DST_ADDR, Value: fd.dstIP})
+		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV4_NEXT_HOP, Value: fd.nextHop})
 	} else {
-		// 0x86dd IPv6
 		items = append(items,
 			ndpiItem{Key: netflow.NFV9_FIELD_IP_PROTOCOL_VERSION, Value: 6},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_SRC_MASK, Value: baseFlow.SrcNet},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_DST_MASK, Value: baseFlow.DstNet},
-			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_FLOW_LABEL, Value: baseFlow.Ipv6FlowLabel},
+			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_SRC_MASK, Value: fd.srcNet},
+			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_DST_MASK, Value: fd.dstNet},
+			ndpiItem{Key: netflow.NFV9_FIELD_IPV6_FLOW_LABEL, Value: fd.ipv6FlowLabel},
 		)
-		copy(ip6, baseFlow.SrcAddr)
-		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV6_SRC_ADDR, Value: ip6.String()})
-		copy(ip6, baseFlow.DstAddr)
-		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV6_DST_ADDR, Value: ip6.String()})
-		copy(ip6, baseFlow.NextHop)
-		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV6_NEXT_HOP, Value: ip6.String()})
+		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV6_SRC_ADDR, Value: fd.srcIP})
+		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV6_DST_ADDR, Value: fd.dstIP})
+		items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IPV6_NEXT_HOP, Value: fd.nextHop})
 	}
 
 	// ICMP
-	icmp_type = uint16((uint16(baseFlow.IcmpType) << 8) + uint16(baseFlow.IcmpCode))
-	items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_ICMP_TYPE, Value: icmp_type})
+	items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_ICMP_TYPE, Value: fd.icmpType})
 
 	// MAC
-	binary.PutUvarint(_hwaddr, baseFlow.DstMac)
-	for i := 0; i < 6; i++ {
-		hwaddr[i] = _hwaddr[i]
-	}
-	items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IN_DST_MAC, Value: hwaddr.String()})
-	binary.PutUvarint(_hwaddr, baseFlow.SrcMac)
-	for i := 0; i < 6; i++ {
-		hwaddr[i] = _hwaddr[i]
-	}
-	items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_OUT_SRC_MAC, Value: hwaddr.String()})
+	items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_IN_DST_MAC, Value: fd.dstMac})
+	items = append(items, ndpiItem{Key: netflow.NFV9_FIELD_OUT_SRC_MAC, Value: fd.srcMac})
 
 	// VLAN
 	items = append(items,
-		ndpiItem{Key: netflow.NFV9_FIELD_SRC_VLAN, Value: baseFlow.SrcVlan},
-		ndpiItem{Key: netflow.NFV9_FIELD_DST_VLAN, Value: baseFlow.DstVlan},
+		ndpiItem{Key: netflow.NFV9_FIELD_SRC_VLAN, Value: fd.srcVlan},
+		ndpiItem{Key: netflow.NFV9_FIELD_DST_VLAN, Value: fd.dstVlan},
 	)
 
 	// Flow Exporter IP
-	if len(baseFlow.SamplerAddress) == 4 {
-		copy(ip4, baseFlow.SamplerAddress)
-		items = append(items, ndpiItem{Key: netflow.IPFIX_FIELD_exporterIPv4Address, Value: ip4.String()})
-	} else if len(baseFlow.SamplerAddress) == 16 {
-		copy(ip6, baseFlow.SamplerAddress)
-		items = append(items, ndpiItem{Key: netflow.IPFIX_FIELD_exporterIPv6Address, Value: ip6.String()})
+	if fd.samplerIPStr != "" {
+		items = append(items, ndpiItem{Key: uint16(fd.samplerIPFieldID), Value: fd.samplerIPStr})
 	}
 
 	// Serialize and make a flow record.
@@ -236,7 +196,8 @@ func (d *NtopngTlv) toTLV(extFlow *proto.ExtendedFlowMessage) ([]byte, error) {
 	return tlvbuf, nil
 }
 
-// ndpi_serialize_* functions in nDPI try to compact to smallest possible size
+// minimalBytesUint encodes v using the smallest unsigned integer type that fits.
+// This matches ndpi_serialize_* functions in nDPI which compact to smallest possible size.
 func minimalBytesUint(v uint64) (minType uint8, minBytes []byte) {
 	if v <= 0xff {
 		minType = ndpi_serialization_uint8
@@ -257,16 +218,17 @@ func minimalBytesUint(v uint64) (minType uint8, minBytes []byte) {
 	return minType, minBytes
 }
 
-// ndpi_serialize_* functions in nDPI try to compact to smallest possible size
+// minimalBytesInt encodes v using the smallest signed integer type that fits.
+// This matches ndpi_serialize_* functions in nDPI which compact to smallest possible size.
 func minimalBytesInt(v int64) (minType uint8, minBytes []byte) {
-	if v <= 0xff {
+	if v >= math.MinInt8 && v <= math.MaxInt8 {
 		minType = ndpi_serialization_int8
 		minBytes = []byte{byte(v)}
-	} else if v <= 0xffff {
+	} else if v >= math.MinInt16 && v <= math.MaxInt16 {
 		minType = ndpi_serialization_int16
 		minBytes = make([]byte, 2)
 		binary.BigEndian.PutUint16(minBytes, uint16(v))
-	} else if v <= 0xffffffff {
+	} else if v >= math.MinInt32 && v <= math.MaxInt32 {
 		minType = ndpi_serialization_int32
 		minBytes = make([]byte, 4)
 		binary.BigEndian.PutUint32(minBytes, uint32(v))

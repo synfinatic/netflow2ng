@@ -50,6 +50,7 @@ type ZmqDriver struct {
 	msgType       MsgFormat
 	compress      bool
 	lock          *sync.RWMutex
+	messageId     uint32 // unique ID for each ZMQ message; wraps at maxMessageId
 }
 
 // This is the latest header as of ntopng 6.4
@@ -63,7 +64,6 @@ type zmqHeaderV3 struct {
 	source_id         uint32
 }
 
-var messageId uint32 = 0                         // Every ZMQ message we send should have a uniq ID
 const maxMessageId uint32 = math.MaxUint32 - 100 // Wrap around before we hit max uint32
 
 func (d *ZmqDriver) Prepare() error {
@@ -88,6 +88,19 @@ func (d *ZmqDriver) Init() error {
 	return nil
 }
 
+// compressJSON compresses data using zlib. Used when sending JSON over ZMQ with compression enabled.
+func compressJSON(data []byte) ([]byte, error) {
+	var zbuf bytes.Buffer
+	z := zlib.NewWriter(&zbuf)
+	if _, err := z.Write(data); err != nil {
+		return nil, err
+	}
+	if err := z.Close(); err != nil {
+		return nil, err
+	}
+	return zbuf.Bytes(), nil
+}
+
 func (d *ZmqDriver) Send(key, data []byte) error {
 	var err error
 	orig_len := uint32(len(data))
@@ -95,30 +108,25 @@ func (d *ZmqDriver) Send(key, data []byte) error {
 
 	// Should only compress JSON
 	if d.msgType == JSON && d.compress {
-		var zbuf bytes.Buffer
-		z := zlib.NewWriter(&zbuf)
-		if _, err = z.Write(data); err != nil {
+		data, err = compressJSON(data)
+		if err != nil {
 			return err
 		}
-		if err = z.Close(); err != nil {
-			return err
-		}
-		// replace data with zlib compressed buffer
-		data = zbuf.Bytes()
 		compressed_len = uint32(len(data))
 	}
 
-	// Lock before accessing messageId or zmq header to ensure messageId is unique
+	// Lock before accessing d.messageId or zmq header to ensure d.messageId is unique
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
-	if messageId == 1 {
+	if d.messageId == 1 {
 		log.Info("Sending first ZMQ message.")
-	} else if messageId%1000 == 0 {
-		log.Debugf("Sending ZMQ message id %d.", messageId)
-	} else if messageId >= maxMessageId {
+	} else if d.messageId%1000 == 0 {
+		log.Debugf("Sending ZMQ message id %d.", d.messageId)
+	}
+	if d.messageId >= maxMessageId {
 		log.Debug("Wrapping message id back to 1 to avoid overflow")
-		messageId = 1
+		d.messageId = 1
 	}
 	header := d.newZmqHeaderV3(orig_len, compressed_len)
 
@@ -183,10 +191,10 @@ func (d *ZmqDriver) newZmqHeaderV3(orig_length uint32, compressed_len uint32) *z
 		flags:             flags,
 		uncompressed_size: orig_length,
 		compressed_size:   compressed_len,
-		msg_id:            messageId,
+		msg_id:            d.messageId,
 		source_id:         uint32(d.sourceId),
 	}
-	messageId++
+	d.messageId++
 
 	return z
 }

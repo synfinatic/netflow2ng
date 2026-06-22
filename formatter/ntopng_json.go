@@ -1,9 +1,7 @@
 package formatter
 
 import (
-	"encoding/binary"
 	"encoding/json"
-	"net"
 	"strconv"
 
 	"github.com/netsampler/goflow2/v2/decoders/netflow"
@@ -23,9 +21,14 @@ func (d *NtopngJson) Init() error {
 
 func (d *NtopngJson) Format(data interface{}) ([]byte, []byte, error) {
 	// The Transport might use "key", but we don't care about it here.
+	// Key() may panic if the ProtoProducerMessage was not initialized via the goflow2 producer
+	// pipeline (e.g., in tests); recover so that key stays nil and formatting continues.
 	var key []byte
 	if dataIf, ok := data.(interface{ Key() []byte }); ok {
-		key = dataIf.Key()
+		func() {
+			defer func() { _ = recover() }()
+			key = dataIf.Key()
+		}()
 	}
 
 	extFlowMsg, err := castToExtendedFlowMsg(data)
@@ -47,41 +50,18 @@ func (d *NtopngJson) Format(data interface{}) ([]byte, []byte, error) {
  * using Formatter.MappingYamlStr
  */
 func (d *NtopngJson) toJSON(extFlow *proto.ExtendedFlowMessage) ([]byte, error) {
-	ip6 := make(net.IP, net.IPv6len)
-	ip4 := make(net.IP, net.IPv4len)
-	hwaddr := make(net.HardwareAddr, 6)
-	_hwaddr := make([]byte, binary.MaxVarintLen64)
-	var icmp_type uint16
-	retmap := make(map[string]interface{})
-	// goflow2 FlowMessage protobuf is embedded in ExtendedFlowMessage
+	fd := extractFlowData(extFlow)
 	baseFlow := extFlow.BaseFlow
+	retmap := make(map[string]interface{})
 
 	// Stats + direction
-	// goflow2 only supports unidirectional flows. There is no Direction field and only one
-	// Bytes/Packets field. Data flow is always Src -> Dst.
-	//
-	// For NetFlow v9/IPFIX, bytes/packets arrive via the mapping.yaml remapping into the
-	// custom ExtendedFlowMessage fields (200-203). For NetFlow v5 (fixed format), the
-	// producer bypasses that remapping and writes directly to FlowMessage.Bytes/Packets,
-	// so fall back to those when the custom fields are unpopulated.
-	inBytes := uint64(extFlow.InBytes)
-	if inBytes == 0 {
-		inBytes = baseFlow.Bytes
-	}
-	inPackets := uint64(extFlow.InPackets)
-	if inPackets == 0 {
-		inPackets = baseFlow.Packets
-	}
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_DIRECTION)] = 0
-	retmap[strconv.Itoa(netflow.NFV9_FIELD_IN_BYTES)] = inBytes
-	retmap[strconv.Itoa(netflow.NFV9_FIELD_IN_PKTS)] = inPackets
-	retmap[strconv.Itoa(netflow.NFV9_FIELD_OUT_BYTES)] = uint64(extFlow.OutBytes)
-	retmap[strconv.Itoa(netflow.NFV9_FIELD_OUT_PKTS)] = uint64(extFlow.OutPackets)
-	// Goflow2 protobuf provides time in ns, but it ntopng expects time in seconds.
-	retmap[strconv.Itoa(netflow.NFV9_FIELD_FIRST_SWITCHED)] =
-		uint32(baseFlow.TimeFlowStartNs / 1_000_000_000)
-	retmap[strconv.Itoa(netflow.NFV9_FIELD_LAST_SWITCHED)] =
-		uint32(baseFlow.TimeFlowEndNs / 1_000_000_000)
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_IN_BYTES)] = fd.inBytes
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_IN_PKTS)] = fd.inPackets
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_OUT_BYTES)] = fd.outBytes
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_OUT_PKTS)] = fd.outPackets
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_FIRST_SWITCHED)] = fd.startSec
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_LAST_SWITCHED)] = fd.endSec
 
 	// L4
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_PROTOCOL)] = baseFlow.Proto
@@ -101,62 +81,41 @@ func (d *NtopngJson) toJSON(extFlow *proto.ExtendedFlowMessage) ([]byte, error) 
 	retmap[strconv.Itoa(netflow.NFV9_FIELD_MIN_TTL)] = baseFlow.IpTtl
 
 	// IP
-	if baseFlow.Etype == 0x800 {
+	if fd.isIPv4 {
 		retmap[strconv.Itoa(netflow.NFV9_FIELD_IP_PROTOCOL_VERSION)] = 4
-		// IPv4
-		copy(ip4, baseFlow.SrcAddr)
-		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV4_SRC_ADDR)] = ip4.String()
-		copy(ip4, baseFlow.DstAddr)
-		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV4_DST_ADDR)] = ip4.String()
-		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV4_SRC_PREFIX)] = baseFlow.SrcNet
-		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV4_DST_PREFIX)] = baseFlow.DstNet
-		copy(ip4, baseFlow.NextHop)
-		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV4_NEXT_HOP)] = ip4.String()
-		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV4_IDENT)] = baseFlow.FragmentId
-		retmap[strconv.Itoa(netflow.NFV9_FIELD_FRAGMENT_OFFSET)] = baseFlow.FragmentOffset
-		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_SRC_MASK)] = baseFlow.SrcNet
-		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_DST_MASK)] = baseFlow.DstNet
+		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV4_SRC_ADDR)] = fd.srcIP
+		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV4_DST_ADDR)] = fd.dstIP
+		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV4_SRC_PREFIX)] = fd.srcNet
+		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV4_DST_PREFIX)] = fd.dstNet
+		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV4_NEXT_HOP)] = fd.nextHop
+		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV4_IDENT)] = fd.fragmentId
+		retmap[strconv.Itoa(netflow.NFV9_FIELD_FRAGMENT_OFFSET)] = fd.fragmentOffset
+		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_SRC_MASK)] = fd.srcNet
+		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_DST_MASK)] = fd.dstNet
 	} else {
-		// 0x86dd IPv6
 		retmap[strconv.Itoa(netflow.NFV9_FIELD_IP_PROTOCOL_VERSION)] = 6
-		copy(ip6, baseFlow.SrcAddr)
-		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_SRC_ADDR)] = ip6.String()
-		copy(ip6, baseFlow.DstAddr)
-		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_DST_ADDR)] = ip6.String()
-		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_SRC_MASK)] = baseFlow.SrcNet
-		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_DST_MASK)] = baseFlow.DstNet
-		copy(ip6, baseFlow.NextHop)
-		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_NEXT_HOP)] = ip6.String()
-		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_FLOW_LABEL)] = baseFlow.Ipv6FlowLabel
+		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_SRC_ADDR)] = fd.srcIP
+		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_DST_ADDR)] = fd.dstIP
+		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_SRC_MASK)] = fd.srcNet
+		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_DST_MASK)] = fd.dstNet
+		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_NEXT_HOP)] = fd.nextHop
+		retmap[strconv.Itoa(netflow.NFV9_FIELD_IPV6_FLOW_LABEL)] = fd.ipv6FlowLabel
 	}
 
 	// ICMP
-	icmp_type = uint16((uint16(baseFlow.IcmpType) << 8) + uint16(baseFlow.IcmpCode))
-	retmap[strconv.Itoa(netflow.NFV9_FIELD_ICMP_TYPE)] = icmp_type
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_ICMP_TYPE)] = fd.icmpType
 
 	// MAC
-	binary.PutUvarint(_hwaddr, baseFlow.DstMac)
-	for i := 0; i < 6; i++ {
-		hwaddr[i] = _hwaddr[i]
-	}
-	retmap[strconv.Itoa(netflow.NFV9_FIELD_IN_DST_MAC)] = hwaddr.String()
-	binary.PutUvarint(_hwaddr, baseFlow.SrcMac)
-	for i := 0; i < 6; i++ {
-		hwaddr[i] = _hwaddr[i]
-	}
-	retmap[strconv.Itoa(netflow.NFV9_FIELD_OUT_SRC_MAC)] = hwaddr.String()
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_IN_DST_MAC)] = fd.dstMac
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_OUT_SRC_MAC)] = fd.srcMac
 
 	// VLAN
-	retmap[strconv.Itoa(netflow.NFV9_FIELD_SRC_VLAN)] = baseFlow.SrcVlan
-	retmap[strconv.Itoa(netflow.NFV9_FIELD_DST_VLAN)] = baseFlow.DstVlan
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_SRC_VLAN)] = fd.srcVlan
+	retmap[strconv.Itoa(netflow.NFV9_FIELD_DST_VLAN)] = fd.dstVlan
 
 	// Flow Exporter IP
-	if len(baseFlow.SamplerAddress) == 4 {
-		copy(ip4, baseFlow.SamplerAddress)
-		retmap[strconv.Itoa(netflow.IPFIX_FIELD_exporterIPv4Address)] = ip4.String()
-	} else if len(baseFlow.SamplerAddress) == 16 {
-		copy(ip6, baseFlow.SamplerAddress)
-		retmap[strconv.Itoa(netflow.IPFIX_FIELD_exporterIPv6Address)] = ip6.String()
+	if fd.samplerIPStr != "" {
+		retmap[strconv.Itoa(fd.samplerIPFieldID)] = fd.samplerIPStr
 	}
 
 	// convert to JSON

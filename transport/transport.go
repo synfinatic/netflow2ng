@@ -20,6 +20,7 @@ func RegisterZmq(zmqListen string, msgType MsgFormat, sourceId int, compress boo
 		msgType:       msgType,
 		compress:      compress,
 		lock:          &sync.RWMutex{},
+		messageId:     1,
 	}
 	transport.RegisterTransportDriver("zmq", z)
 }
