@@ -49,6 +49,7 @@ type ZmqDriver struct {
 	sourceId      int
 	msgType       MsgFormat
 	compress      bool
+	encryption    *EncryptionConfig // nil = cleartext
 	lock          *sync.RWMutex
 	messageId     uint32 // unique ID for each ZMQ message; wraps at maxMessageId
 }
@@ -75,10 +76,23 @@ func (d *ZmqDriver) Prepare() error {
 func (d *ZmqDriver) Init() error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	d.context, _ = zmq.NewContext()
-	d.publisher, _ = d.context.NewSocket(zmq.PUB)
-	if err := d.publisher.Bind(d.listenAddress); err != nil {
-		log.Fatalf("Unable to bind: %s", err.Error())
+
+	var err error
+	if d.context, err = zmq.NewContext(); err != nil {
+		return fmt.Errorf("unable to create ZMQ context: %w", err)
+	}
+	if d.publisher, err = d.context.NewSocket(zmq.PUB); err != nil {
+		return fmt.Errorf("unable to create ZMQ socket: %w", err)
+	}
+
+	// CURVE options must be set before Bind(): libzmq reads them while setting
+	// up the transport and ignores them afterwards.
+	if err = d.encryption.apply(d.publisher); err != nil {
+		return err
+	}
+
+	if err = d.publisher.Bind(d.listenAddress); err != nil {
+		return fmt.Errorf("unable to bind to %s: %w", d.listenAddress, err)
 	}
 
 	log.Infof("Started ZMQ listener on: %s", d.listenAddress)
@@ -172,7 +186,23 @@ func (d *ZmqDriver) Send(key, data []byte) error {
 }
 
 func (d *ZmqDriver) Close() error {
-	// Do stuff here
+	d.lock.Lock()
+	defer d.lock.Unlock()
+
+	if d.publisher != nil {
+		if err := d.publisher.Close(); err != nil {
+			return fmt.Errorf("unable to close ZMQ socket: %w", err)
+		}
+		d.publisher = nil
+	}
+
+	if d.context != nil {
+		if err := d.context.Term(); err != nil {
+			return fmt.Errorf("unable to terminate ZMQ context: %w", err)
+		}
+		d.context = nil
+	}
+
 	return nil
 }
 
