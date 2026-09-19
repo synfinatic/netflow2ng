@@ -158,8 +158,11 @@ connect with the wrong key.
         `zmq_msg_rcvd=0`
       - built-in default key both sides -> `level=info msg="A collector completed the ZMQ CURVE
         handshake on tcp://0.0.0.0:5556"`, `zmq_msg_rcvd=588`, `num_flows=21`, 0 drops
-- [x] `go vet` clean, `go test -race ./...` 184 pass in 4 packages, `gofmt -l` clean for
-      touched files, coverage 69.4% -> 70.1%
+- [x] Also covers the reverse mismatch: cleartext netflow2ng against a CURVE collector, which
+      is what `--zmq-disable-encryption` against a modern ntopng looks like
+      (`TestZmqDriver_CleartextHandshakeFailure_IsLogged`)
+- [x] `go vet` clean, `go test -race ./...` 185 pass in 4 packages, `gofmt -l` clean for
+      touched files, coverage 69.4% -> 70.3%
 
 ### Task 10: Operator-facing docs for debugging (docs only, no TDD cycle)
 - [x] README "Troubleshooting" rewritten around the new handshake log lines, and spells out

@@ -136,3 +136,31 @@ func TestZmqDriver_CurveHandshakeSuccess_IsLogged(t *testing.T) {
 
 	waitForLog(t, buf, "completed the ZMQ CURVE handshake", 10*time.Second)
 }
+
+// TestZmqDriver_CleartextHandshakeFailure_IsLogged covers the other half of the
+// mismatch: netflow2ng running with --zmq-disable-encryption against a collector
+// that expects CURVE, which is what ntopng 6.7.280831 and later do by default.
+func TestZmqDriver_CleartextHandshakeFailure_IsLogged(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping ZMQ integration test in short mode")
+	}
+	if !zmq.HasCurve() {
+		t.Skip("libzmq built without CURVE support")
+	}
+	const addr = "tcp://127.0.0.1:15583"
+
+	buf := captureTransportLog(t)
+
+	d := newZmqDriver(addr, TLV, 42, false, nil)
+	if err := d.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+
+	newNtopngStyleSubscriber(t, addr, testNtopngDefaultPrivKey)
+
+	waitForLog(t, buf, "failed the ZMQ handshake", 10*time.Second)
+	if !strings.Contains(buf.String(), "--zmq-disable-encryption") {
+		t.Errorf("handshake failure log does not explain the cleartext mismatch: %s", buf.String())
+	}
+}
