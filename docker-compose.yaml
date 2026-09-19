@@ -4,6 +4,14 @@ services:
     container_name: netflow2ng
     restart: unless-stopped
     entrypoint: /netflow2ng # --level=debug
+    # ZMQ flows are encrypted by default (CurveZMQ), which matches ntopng
+    # 6.7.280831 and newer.  To use a dedicated key instead of ntopng's
+    # built-in default, run ntopng with --zmq-encryption and pass its public
+    # key here, eg:
+    #   environment:
+    #     NETFLOW2NG_ZMQ_ENCRYPTION_KEY: "<40 char Z85 key from ntopng>"
+    # For ntopng older than 6.7.280831, disable encryption on BOTH services:
+    #   entrypoint: /netflow2ng --zmq-disable-encryption
     # network mode must be host due to source port changing for inbound netflow packets with NAT
     network_mode: host
 
@@ -13,6 +21,9 @@ services:
 
   ntopng:
     image: "ntop/ntopng:latest"
+    # Add "--zmq-encryption" to have ntopng generate its own keypair; its public
+    # key then goes to netflow2ng via NETFLOW2NG_ZMQ_ENCRYPTION_KEY above.
+    # Add "--zmq-disable-encryption" here only if netflow2ng also has it.
     command: ["--community", "--redis", "localhost", "--interface", "tcp://localhost:5556", "--disable-login", "--local-networks", "172.16.0.0/12", "--insecure"]
     network_mode: host
     depends_on:
