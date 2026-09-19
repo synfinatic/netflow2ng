@@ -134,3 +134,42 @@ therefore run with ntopng's self-generated keypair, which is the documented path
 - [x] Coverage not regressed: 68.4% at HEAD (measured in a temporary `git worktree`, since
       `coverage.out` is gitignored) -> 69.4% now
 - [x] README instructions followed end to end against a live ntopng 7.0.260918
+
+### Task 9: Make the silent CURVE mismatch diagnosable (S) — full RED -> GREEN cycle
+Raised by "should we update the docs to help people debug this?": the better answer was to
+stop the failure being silent in the first place. `pebbe/zmq4` exposes libzmq's socket
+monitor, and a probe confirmed the PUB socket does receive handshake events for peers that
+connect with the wrong key.
+
+- [x] RED: `transport/monitor_test.go` — `TestShouldLogHandshakeFailure` (pure, table-driven),
+      `TestZmqDriver_CurveHandshakeFailure_IsLogged` and
+      `TestZmqDriver_CurveHandshakeSuccess_IsLogged` (real sockets, package log captured
+      through a mutex-guarded buffer). All three observed failing on assertions against a
+      `shouldLogHandshakeFailure` stub returning false.
+- [x] GREEN: `transport/monitor.go` — `startMonitor`/`stopMonitor`/`watchHandshakes` attach a
+      `zmq.PAIR` monitor before `Bind()` (libzmq only reports events for endpoints created
+      afterwards) and log CURVE handshake success at info, failure at warn with the key and
+      the flags to fix it. `Close()` joins the goroutine before terminating the context.
+- [x] Throttle: peers reconnect on failure, so only failures 1-3, then every 10th, then every
+      100th are logged loudly.
+- [x] Live verification against ntopng 7.0.260918 (docker):
+      - wrong key -> `level=warning msg="ZMQ CURVE handshake failed on tcp://0.0.0.0:5556
+        (failure #1): the collector does not hold the private key matching public key ..."`,
+        `zmq_msg_rcvd=0`
+      - built-in default key both sides -> `level=info msg="A collector completed the ZMQ CURVE
+        handshake on tcp://0.0.0.0:5556"`, `zmq_msg_rcvd=588`, `num_flows=21`, 0 drops
+- [x] `go vet` clean, `go test -race ./...` 184 pass in 4 packages, `gofmt -l` clean for
+      touched files, coverage 69.4% -> 70.1%
+
+### Task 10: Operator-facing docs for debugging (docs only, no TDD cycle)
+- [x] README "Troubleshooting" rewritten around the new handshake log lines, and spells out
+      that the rest of the output is misleading (`Started ZMQ listener`, `Sending first ZMQ
+      message` and ntopng's `Collecting flows on ...` all still print on a mismatch)
+- [x] Added: ntopng's `zmqRecvStats` REST check (`/lua/rest/v2/get/interface/data.lua?ifid=0`)
+      as the definitive "did ntopng receive anything" answer
+- [x] Added: shell-quoting warning — Z85 keys contain `$ & < > [ ] { } ( ) # % ! * ?`, which
+      cost real debugging time in the interop harness
+- [x] Added: `ntopng --version` vs 6.7.280831, `ldd | grep sodium` for the CURVE check, and
+      the ntopng `--zmq-encryption-key-priv` startup hang seen during Task 6
+- [x] `package/netflow2ng.env` (shipped in the .deb/.rpm at `/etc/default/netflow2ng`) now
+      documents the key-file and disable-encryption forms

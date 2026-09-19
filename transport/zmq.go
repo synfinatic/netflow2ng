@@ -50,6 +50,9 @@ type ZmqDriver struct {
 	msgType       MsgFormat
 	compress      bool
 	encryption    *EncryptionConfig // nil = cleartext
+	monitor       *zmq.Socket       // handshake events for the publisher socket
+	monitorStop   chan struct{}
+	monitorDone   chan struct{}
 	lock          *sync.RWMutex
 	messageId     uint32 // unique ID for each ZMQ message; wraps at maxMessageId
 }
@@ -89,6 +92,12 @@ func (d *ZmqDriver) Init() error {
 	// up the transport and ignores them afterwards.
 	if err = d.encryption.apply(d.publisher); err != nil {
 		return err
+	}
+
+	// Handshake events are only reported for endpoints created after the
+	// monitor is attached, so this has to come before Bind() too.
+	if err = d.startMonitor(); err != nil {
+		log.Warnf("ZMQ handshake monitoring is unavailable: %s", err)
 	}
 
 	if err = d.publisher.Bind(d.listenAddress); err != nil {
@@ -188,6 +197,8 @@ func (d *ZmqDriver) Send(key, data []byte) error {
 func (d *ZmqDriver) Close() error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+
+	d.stopMonitor()
 
 	if d.publisher != nil {
 		if err := d.publisher.Close(); err != nil {

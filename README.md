@@ -117,16 +117,76 @@ ntopng -i tcp://192.168.1.1:5556 --zmq-disable-encryption
 
 #### Troubleshooting
 
-* **No flows in ntopng, no errors anywhere.** The two sides disagree about
-  encryption, or about the key.  A CURVE mismatch fails silently at the ZMQ
-  layer: netflow2ng keeps publishing and ntopng simply never receives
-  anything.  Check that netflow2ng's startup log and ntopng's `--zmq-*`
-  settings match, and compare the key netflow2ng logs against ntopng's
-  `zmq-key.pub`.
+netflow2ng watches its ZMQ socket for handshake events, so the encryption state
+shows up in the log as soon as a collector connects.  **A collector connected
+and the keys match:**
+
+```
+level=info msg="A collector completed the ZMQ CURVE handshake on tcp://0.0.0.0:5556"
+```
+
+**The keys do not match:**
+
+```
+level=warning msg="ZMQ CURVE handshake failed on tcp://0.0.0.0:5556 (failure #1): \
+  the collector does not hold the private key matching public key <key>.  Compare \
+  --zmq-encryption-key against ntopng's zmq-key.pub, or run both sides with \
+  --zmq-disable-encryption."
+```
+
+That warning is the only signal you get.  A CURVE mismatch fails silently
+everywhere else: netflow2ng still logs `Started ZMQ listener` and `Sending
+first ZMQ message`, ntopng still logs `Collecting flows on tcp://...`, and the
+flows just never arrive.  Nothing falls back to cleartext.
+
+A collector that keeps retrying with the wrong key is not logged on every
+attempt -- the first three failures are logged, then every tenth, then every
+hundredth.
+
+* **Neither handshake line ever appears.** ntopng has not reached netflow2ng at
+  all, so this is not an encryption problem: check `--interface
+  tcp://<host>:5556` on the ntopng side, routing, and any firewall between
+  them.
+* **Ask ntopng what it actually received.** Its REST API reports the ZMQ
+  receive counters, which is the definitive answer:
+
+  ```bash
+  curl -s 'http://<ntopng>:3000/lua/rest/v2/get/interface/data.lua?ifid=0' \
+      | jq '.rsp.zmqRecvStats'
+  ```
+
+  `zmq_msg_rcvd` climbing means the feed is working.  `zmq_msg_rcvd` stuck at 0
+  while netflow2ng reports sending messages means the two sides never completed
+  a handshake.
+
+* **Quote your keys.** Z85 keys contain `$ & < > [ ] { } ( ) # % ! * ?`, all of
+  which the shell will happily mangle -- `$Kb` expands to nothing and `>ol`
+  becomes a redirect.  Always single-quote them:
+
+  ```bash
+  netflow2ng --zmq-encryption-key '+hO@^5%GQ]^H6=fim{?$i-eu^Qcgi0l1}I:dYFN{'
+  ```
+
+  `--zmq-encryption-key-file` sidesteps the problem entirely and is the better
+  choice anywhere the key is not typed by hand -- compose files, init scripts,
+  and the `/etc/default/netflow2ng` used by the .deb and .rpm packages.  Copy
+  ntopng's `zmq-key.pub` to the netflow2ng host and point at the copy.
+
+* **Check which ntopng you are running.** `ntopng --version`.  6.7.280831 and
+  newer encrypt by default; older releases need
+  `--zmq-disable-encryption` on *both* sides.
+
 * **`this build of libzmq has no CURVE support`.** Your libzmq was built
   without libsodium.  Rebuild it with libsodium, install a distro package that
   has it, or run with `--zmq-disable-encryption`.  The official netflow2ng
-  Docker image includes CURVE support.
+  Docker image includes CURVE support; you can confirm with
+  `ldd /usr/bin/netflow2ng | grep sodium`.
+
+* **ntopng will not finish starting up.** ntopng's own
+  `--zmq-encryption-key-priv` flag is marked "debug only" in its help, and
+  hung ntopng at *"Unable to retain privileges for privileged file writing"*
+  during testing.  Let ntopng generate its own keypair with `--zmq-encryption`
+  and read the public key out of `zmq-key.pub` instead.
 
 ### Features
 
