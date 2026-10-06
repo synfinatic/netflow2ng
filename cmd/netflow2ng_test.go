@@ -11,8 +11,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	localtransport "github.com/synfinatic/netflow2ng/transport"
+	"github.com/alecthomas/kong"
 	"github.com/sirupsen/logrus"
+	localtransport "github.com/synfinatic/netflow2ng/transport"
 )
 
 func init() {
@@ -46,8 +47,8 @@ func TestSourceId_Validate_Invalid(t *testing.T) {
 
 func TestAddress_Value_Valid(t *testing.T) {
 	cases := []struct {
-		addr    Address
-		wantIP  string
+		addr     Address
+		wantIP   string
 		wantPort int
 	}{
 		{"0.0.0.0:2055", "0.0.0.0", 2055},
@@ -485,4 +486,168 @@ func TestNewTemplatesHandler_SuccessWriteError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/templates", nil)
 	rr := &failWriteRecorder{ResponseRecorder: httptest.NewRecorder()}
 	handler(rr, req) // marshal succeeds → wr.Write(body) fails → log.Error path
+}
+
+// --- ZMQ encryption flags ---
+
+// parseCLI parses args into a fresh CLI struct the same way main() does.
+func parseCLI(t *testing.T, args ...string) *CLI {
+	t.Helper()
+	cli := &CLI{}
+	parser, err := kong.New(cli, kong.Name("netflow2ng"), kong.Exit(func(int) {}))
+	if err != nil {
+		t.Fatalf("unable to build parser: %v", err)
+	}
+	if _, err := parser.Parse(args); err != nil {
+		t.Fatalf("Parse(%v) returned unexpected error: %v", args, err)
+	}
+	return cli
+}
+
+func TestCLI_EncryptionFlags(t *testing.T) {
+	const key = "+hO@^5%GQ]^H6=fim{?$i-eu^Qcgi0l1}I:dYFN{"
+	cli := parseCLI(t,
+		"--zmq-encryption-key", key,
+		"--zmq-encryption-key-file", "/tmp/zmq-key.pub",
+		"--zmq-client-priv-key", "=m8rLxEcVs:*!M6x0iWW{)i$uwN9.:[5-3:NCIDY",
+		"--zmq-disable-encryption",
+	)
+
+	if cli.ZmqEncryptionKey != key {
+		t.Errorf("ZmqEncryptionKey = %q, want %q", cli.ZmqEncryptionKey, key)
+	}
+	if cli.ZmqEncryptionKeyFile != "/tmp/zmq-key.pub" {
+		t.Errorf("ZmqEncryptionKeyFile = %q, want /tmp/zmq-key.pub", cli.ZmqEncryptionKeyFile)
+	}
+	if cli.ZmqClientPrivKey == "" {
+		t.Error("ZmqClientPrivKey is empty, want the supplied key")
+	}
+	if !cli.ZmqDisableEncryption {
+		t.Error("ZmqDisableEncryption = false, want true")
+	}
+}
+
+func TestCLI_EncryptionDefaults(t *testing.T) {
+	cli := parseCLI(t)
+
+	if cli.ZmqDisableEncryption {
+		t.Error("ZmqDisableEncryption defaults to true, want false (encryption on by default)")
+	}
+	if cli.ZmqEncryptionKey != "" || cli.ZmqEncryptionKeyFile != "" || cli.ZmqClientPrivKey != "" {
+		t.Error("expected all encryption key fields to default to empty")
+	}
+}
+
+func TestCLI_EncryptionEnvVars(t *testing.T) {
+	const key = "+hO@^5%GQ]^H6=fim{?$i-eu^Qcgi0l1}I:dYFN{"
+	t.Setenv("NETFLOW2NG_ZMQ_ENCRYPTION_KEY", key)
+	t.Setenv("NETFLOW2NG_ZMQ_ENCRYPTION_KEY_FILE", "/tmp/from-env.pub")
+	t.Setenv("NETFLOW2NG_ZMQ_DISABLE_ENCRYPTION", "true")
+
+	cli := parseCLI(t)
+
+	if cli.ZmqEncryptionKey != key {
+		t.Errorf("ZmqEncryptionKey = %q, want the env var value %q", cli.ZmqEncryptionKey, key)
+	}
+	if cli.ZmqEncryptionKeyFile != "/tmp/from-env.pub" {
+		t.Errorf("ZmqEncryptionKeyFile = %q, want /tmp/from-env.pub", cli.ZmqEncryptionKeyFile)
+	}
+	if !cli.ZmqDisableEncryption {
+		t.Error("ZmqDisableEncryption = false, want true from the env var")
+	}
+}
+
+func TestCLI_EncryptionFlagBeatsEnvVar(t *testing.T) {
+	const flagKey = "=m8rLxEcVs:*!M6x0iWW{)i$uwN9.:[5-3:NCIDY"
+	t.Setenv("NETFLOW2NG_ZMQ_ENCRYPTION_KEY", "+hO@^5%GQ]^H6=fim{?$i-eu^Qcgi0l1}I:dYFN{")
+
+	cli := parseCLI(t, "--zmq-encryption-key", flagKey)
+
+	if cli.ZmqEncryptionKey != flagKey {
+		t.Errorf("ZmqEncryptionKey = %q, want the flag value %q", cli.ZmqEncryptionKey, flagKey)
+	}
+}
+
+// --- setupEncryption ---
+
+func TestSetupEncryption_NoFlagsUsesBuiltinDefault(t *testing.T) {
+	cfg, err := setupEncryption(&CLI{}, log)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected a config, got nil")
+	}
+	if cfg.ServerKey != localtransport.DefaultNtopngPublicKey {
+		t.Errorf("ServerKey = %q, want ntopng's built-in default", cfg.ServerKey)
+	}
+	if !cfg.UsingDefaultKey {
+		t.Error("UsingDefaultKey = false, want true so the warning is logged")
+	}
+}
+
+func TestSetupEncryption_Disabled(t *testing.T) {
+	cfg, err := setupEncryption(&CLI{ZmqDisableEncryption: true}, log)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg != nil {
+		t.Errorf("expected nil config when encryption is disabled, got %+v", cfg)
+	}
+}
+
+func TestSetupEncryption_InvalidKeyErrors(t *testing.T) {
+	cfg, err := setupEncryption(&CLI{ZmqEncryptionKey: "BADKEY"}, log)
+	if err == nil {
+		t.Fatalf("expected an error for an invalid key, got config %+v", cfg)
+	}
+	if !strings.Contains(err.Error(), "BADKEY") {
+		t.Errorf("error %q does not name the offending key", err.Error())
+	}
+}
+
+// captureLog returns a logger writing into buf, for asserting on startup messages.
+func captureLog(buf *bytes.Buffer) *logrus.Logger {
+	l := logrus.New()
+	l.SetOutput(buf)
+	l.SetLevel(logrus.DebugLevel)
+	return l
+}
+
+// A CURVE key mismatch fails silently at the ZMQ layer, so the key netflow2ng
+// is actually using has to be visible in the log to be comparable against
+// ntopng's zmq-key.pub. It is a public key; logging it leaks nothing.
+func TestSetupEncryption_LogsTheServerKeyInUse(t *testing.T) {
+	const key = "rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7"
+
+	tests := []struct {
+		name string
+		cli  CLI
+		want string
+	}{
+		{"explicit key", CLI{ZmqEncryptionKey: key}, key},
+		{"key file", CLI{ZmqEncryptionKeyFile: writeTestKeyFile(t, key)}, key},
+		{"built-in default", CLI{}, localtransport.DefaultNtopngPublicKey},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if _, err := setupEncryption(&tc.cli, captureLog(&buf)); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !strings.Contains(buf.String(), tc.want) {
+				t.Errorf("log %q does not contain the key in use (%q)", buf.String(), tc.want)
+			}
+		})
+	}
+}
+
+func writeTestKeyFile(t *testing.T, key string) string {
+	t.Helper()
+	path := t.TempDir() + "/zmq-key.pub"
+	if err := os.WriteFile(path, []byte(key), 0o600); err != nil {
+		t.Fatalf("unable to write key file: %v", err)
+	}
+	return path
 }

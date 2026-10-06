@@ -5,6 +5,7 @@ import (
 	"compress/zlib"
 	"encoding/binary"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -294,7 +295,34 @@ func TestZmqDriver_Close(t *testing.T) {
 func TestRegisterZmq(t *testing.T) {
 	// RegisterZmq creates a ZmqDriver and registers it with goflow2's transport
 	// registry. We just verify it doesn't panic.
-	RegisterZmq("tcp://127.0.0.1:15600", TLV, 1, false)
+	RegisterZmq("tcp://127.0.0.1:15600", TLV, 1, false, nil)
+}
+
+// TestNewZmqDriver_PassesEncryption verifies the encryption config reaches the
+// driver; nothing else in the Register path would catch a dropped argument.
+func TestNewZmqDriver_PassesEncryption(t *testing.T) {
+	enc := &EncryptionConfig{ServerKey: DefaultNtopngPublicKey}
+
+	d := newZmqDriver("tcp://127.0.0.1:15601", TLV, 1, true, enc)
+
+	if d.encryption != enc {
+		t.Errorf("driver encryption = %+v, want the supplied config", d.encryption)
+	}
+	if d.listenAddress != "tcp://127.0.0.1:15601" || d.msgType != TLV || d.sourceId != 1 || !d.compress {
+		t.Errorf("driver fields not wired through: %+v", d)
+	}
+	if d.messageId != 1 {
+		t.Errorf("messageId = %d, want 1", d.messageId)
+	}
+}
+
+// TestNewZmqDriver_NilEncryptionIsCleartext guards the unencrypted default.
+func TestNewZmqDriver_NilEncryptionIsCleartext(t *testing.T) {
+	d := newZmqDriver("tcp://127.0.0.1:15602", JSON, 0, false, nil)
+
+	if d.encryption != nil {
+		t.Errorf("driver encryption = %+v, want nil", d.encryption)
+	}
 }
 
 // --- ZMQ integration tests (require actual ZMQ socket) ---
@@ -570,5 +598,203 @@ func TestZmqDriver_Send_UnknownMsgType(t *testing.T) {
 	// Send should succeed even for unknown type (data is transmitted, default case just logs)
 	if err := d.Send(nil, []byte("test")); err != nil {
 		t.Fatalf("Send() with unknown msgType error: %v", err)
+	}
+}
+
+// --- ZmqDriver.Init ---
+
+// TestZmqDriver_Init_BindErrorIsReturned verifies Init() reports a bad listen
+// address to its caller instead of terminating the process. goflow2's
+// transport.FindTransport already propagates this error up to main().
+func TestZmqDriver_Init_BindErrorIsReturned(t *testing.T) {
+	d := newTestDriver(TLV, false, 0)
+	d.listenAddress = "not-a-valid-endpoint"
+
+	err := d.Init()
+	if err == nil {
+		t.Fatal("Init() returned nil for an unbindable address, want an error")
+	}
+	if !strings.Contains(err.Error(), "not-a-valid-endpoint") {
+		t.Errorf("error %q does not name the offending address", err.Error())
+	}
+}
+
+// TestZmqDriver_Init_AppliesCurveBeforeBind verifies the CURVE options survive
+// the Bind() call. libzmq reads them while setting up the transport and ignores
+// them afterwards, so a socket that reports the server key after Init() proves
+// apply() ran first.
+func TestZmqDriver_Init_AppliesCurveBeforeBind(t *testing.T) {
+	if !zmq.HasCurve() {
+		t.Skip("libzmq built without CURVE support")
+	}
+	d := newTestDriver(TLV, false, 0)
+	d.listenAddress = "tcp://127.0.0.1:15570"
+	d.encryption = &EncryptionConfig{ServerKey: DefaultNtopngPublicKey}
+
+	if err := d.Init(); err != nil {
+		t.Fatalf("Init() returned unexpected error: %v", err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+
+	got, err := d.publisher.GetCurveServerkeyZ85()
+	if err != nil {
+		t.Fatalf("GetCurveServerkeyZ85() failed: %v", err)
+	}
+	if got != DefaultNtopngPublicKey {
+		t.Errorf("ZMQ_CURVE_SERVERKEY = %q after Init(), want %q", got, DefaultNtopngPublicKey)
+	}
+}
+
+// TestZmqDriver_Init_NoEncryptionStaysCleartext guards the unencrypted path
+// that existing deployments rely on.
+func TestZmqDriver_Init_NoEncryptionStaysCleartext(t *testing.T) {
+	d := newTestDriver(TLV, false, 0)
+	d.listenAddress = "tcp://127.0.0.1:15571"
+
+	if err := d.Init(); err != nil {
+		t.Fatalf("Init() returned unexpected error: %v", err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+
+	mech, err := d.publisher.GetMechanism()
+	if err != nil {
+		t.Fatalf("GetMechanism() failed: %v", err)
+	}
+	if mech != zmq.NULL {
+		t.Errorf("mechanism = %v, want NULL when no encryption is configured", mech)
+	}
+}
+
+// TestZmqDriver_Close_ReleasesSocket verifies Close() actually tears the socket
+// down: a second driver must be able to bind the same port afterwards. Without
+// this the listener survives until the process exits.
+func TestZmqDriver_Close_ReleasesSocket(t *testing.T) {
+	const addr = "tcp://127.0.0.1:15572"
+
+	first := newTestDriver(TLV, false, 0)
+	first.listenAddress = addr
+	if err := first.Init(); err != nil {
+		t.Fatalf("first Init() returned unexpected error: %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close() returned unexpected error: %v", err)
+	}
+
+	second := newTestDriver(TLV, false, 0)
+	second.listenAddress = addr
+	if err := second.Init(); err != nil {
+		t.Fatalf("second Init() on the same port failed, Close() did not release it: %v", err)
+	}
+	t.Cleanup(func() { _ = second.Close() })
+}
+
+// --- CURVE interop ---
+
+// newNtopngStyleSubscriber returns a SUB socket configured the way ntopng
+// configures its ZMQ collector: CURVE *server* role plus its own secret key,
+// connecting out to the publisher (see ZMQUtils::setServerEncryptionKeys and
+// ZMQCollectorInterface.cpp in ntopng).
+func newNtopngStyleSubscriber(t *testing.T, addr, secretKey string) *zmq.Socket {
+	t.Helper()
+	ctx, err := zmq.NewContext()
+	if err != nil {
+		t.Fatalf("failed to create ZMQ context: %v", err)
+	}
+	sub, err := ctx.NewSocket(zmq.SUB)
+	if err != nil {
+		t.Fatalf("failed to create SUB socket: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Close() })
+
+	if err := sub.SetCurveServer(1); err != nil {
+		t.Fatalf("SetCurveServer error: %v", err)
+	}
+	if err := sub.SetCurveSecretkey(secretKey); err != nil {
+		t.Fatalf("SetCurveSecretkey error: %v", err)
+	}
+	if err := sub.Connect(addr); err != nil {
+		t.Fatalf("failed to connect subscriber: %v", err)
+	}
+	if err := sub.SetSubscribe(""); err != nil {
+		t.Fatalf("SetSubscribe error: %v", err)
+	}
+	return sub
+}
+
+// TestZmqDriver_CurveInterop_NtopngStyleCollector is the automated stand-in for
+// the live ntopng check: netflow2ng as CURVE client, an ntopng-shaped CURVE
+// server as subscriber, payload delivered intact over the encrypted channel.
+func TestZmqDriver_CurveInterop_NtopngStyleCollector(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping ZMQ integration test in short mode")
+	}
+	if !zmq.HasCurve() {
+		t.Skip("libzmq built without CURVE support")
+	}
+	const addr = "tcp://127.0.0.1:15573"
+
+	sub := newNtopngStyleSubscriber(t, addr, testNtopngDefaultPrivKey)
+
+	d := newZmqDriver(addr, TLV, 42, false, &EncryptionConfig{ServerKey: DefaultNtopngPublicKey})
+	if err := d.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+
+	testPayload := []byte{0x01, 0x01, 0x01}
+	if err := d.Send(nil, testPayload); err != nil {
+		t.Fatalf("Send() error: %v", err)
+	}
+
+	if err := sub.SetRcvtimeo(5 * time.Second); err != nil {
+		t.Fatalf("SetRcvtimeo error: %v", err)
+	}
+	if _, err := sub.RecvBytes(0); err != nil {
+		t.Fatalf("failed to receive header frame over CURVE: %v", err)
+	}
+	payload, err := sub.RecvBytes(0)
+	if err != nil {
+		t.Fatalf("failed to receive payload frame over CURVE: %v", err)
+	}
+	if !bytes.Equal(payload, testPayload) {
+		t.Errorf("payload mismatch: got %v, want %v", payload, testPayload)
+	}
+}
+
+// TestZmqDriver_CurveInterop_WrongServerKeyDeliversNothing pins the failure mode
+// operators will hit with a mismatched key: the handshake never completes, so
+// no flows arrive. It must fail closed, never fall back to cleartext.
+func TestZmqDriver_CurveInterop_WrongServerKeyDeliversNothing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping ZMQ integration test in short mode")
+	}
+	if !zmq.HasCurve() {
+		t.Skip("libzmq built without CURVE support")
+	}
+	const addr = "tcp://127.0.0.1:15574"
+
+	// The collector holds the built-in default keypair...
+	sub := newNtopngStyleSubscriber(t, addr, testNtopngDefaultPrivKey)
+
+	// ...but netflow2ng was told a different public key.
+	wrongPub, _, err := zmq.NewCurveKeypair()
+	if err != nil {
+		t.Fatalf("unable to generate a test keypair: %v", err)
+	}
+	d := newZmqDriver(addr, TLV, 42, false, &EncryptionConfig{ServerKey: wrongPub})
+	if err := d.Init(); err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	t.Cleanup(func() { _ = d.Close() })
+
+	if err := d.Send(nil, []byte{0x01, 0x01, 0x01}); err != nil {
+		t.Fatalf("Send() error: %v", err)
+	}
+
+	if err := sub.SetRcvtimeo(2 * time.Second); err != nil {
+		t.Fatalf("SetRcvtimeo error: %v", err)
+	}
+	if got, err := sub.RecvBytes(0); err == nil {
+		t.Errorf("received %d bytes despite a mismatched CURVE key; want no delivery", len(got))
 	}
 }

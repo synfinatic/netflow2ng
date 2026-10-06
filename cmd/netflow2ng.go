@@ -87,6 +87,13 @@ type CLI struct {
 	Format    string   `short:"f" help:"Output format [tlv|json|jcompress|proto] for ZMQ." enum:"tlv,json,jcompress,proto" default:"tlv"`
 	Workers   int      `short:"w" help:"Number of NetFlow workers" default:"2"`
 
+	// ZMQ CURVE encryption. ntopng >= 6.7.280831 encrypts by default and drops
+	// cleartext flows, so netflow2ng encrypts by default too.
+	ZmqEncryptionKey     string `help:"ntopng's ZMQ public key (40 char Z85)" env:"NETFLOW2NG_ZMQ_ENCRYPTION_KEY"`
+	ZmqEncryptionKeyFile string `help:"Path to a file holding ntopng's ZMQ public key (eg: ntopng's zmq-key.pub)" env:"NETFLOW2NG_ZMQ_ENCRYPTION_KEY_FILE"`
+	ZmqDisableEncryption bool   `help:"Disable ZMQ encryption; requires ntopng --zmq-disable-encryption" env:"NETFLOW2NG_ZMQ_DISABLE_ENCRYPTION"`
+	ZmqClientPrivKey     string `help:"Pin netflow2ng's own ZMQ private key (40 char Z85) instead of generating one" env:"NETFLOW2NG_ZMQ_CLIENT_PRIV_KEY"`
+
 	LogLevel  string `short:"l" help:"Log level [error|warn|info|debug|trace]" default:"info" enum:"error,warn,info,debug,trace"`
 	LogFormat string `help:"Log format [default|json]" default:"default" enum:"default,json"`
 
@@ -153,6 +160,32 @@ func selectFormat(formatStr string, l *logrus.Logger) (localtransport.MsgFormat,
 	}
 
 	return msgType, f, compress, nil
+}
+
+// setupEncryption resolves the ZMQ encryption flags into a transport config,
+// logging what was selected.
+func setupEncryption(cli *CLI, l *logrus.Logger) (*localtransport.EncryptionConfig, error) {
+	enc, err := localtransport.ResolveEncryption(
+		cli.ZmqDisableEncryption, cli.ZmqEncryptionKey, cli.ZmqEncryptionKeyFile, cli.ZmqClientPrivKey)
+	if err != nil {
+		return nil, err
+	}
+
+	switch {
+	case enc == nil:
+		l.Warn("ZMQ encryption is disabled: flows are sent in cleartext. " +
+			"ntopng 6.7.280831 and later drop cleartext flows unless started with --zmq-disable-encryption.")
+	case enc.UsingDefaultKey:
+		l.Warnf("Using ntopng's built-in default ZMQ encryption key (%s). This matches a stock "+
+			"ntopng, but anyone can decrypt the flows: configure a dedicated key with "+
+			"--zmq-encryption-key.", enc.ServerKey)
+	default:
+		// Log the key: a CURVE mismatch fails silently at the ZMQ layer, so this is
+		// the only way to compare against ntopng's zmq-key.pub. It is a public key.
+		l.Infof("ZMQ CURVE encryption enabled using ntopng public key %s", enc.ServerKey)
+	}
+
+	return enc, nil
 }
 
 // newHealthHandler returns an HTTP handler for the /__health endpoint.
@@ -225,7 +258,12 @@ func main() {
 		log.Fatal(err)
 	}
 
-	localtransport.RegisterZmq(rctx.cli.ListenZmq, msgType, int(rctx.cli.SourceId), compress)
+	encryption, err := setupEncryption(&rctx.cli, log)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	localtransport.RegisterZmq(rctx.cli.ListenZmq, msgType, int(rctx.cli.SourceId), compress, encryption)
 
 	transporter, err := transport.FindTransport("zmq")
 	if err != nil {
