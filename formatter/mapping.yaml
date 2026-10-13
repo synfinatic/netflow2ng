@@ -27,3 +27,16 @@ netflowv9:
       destination: out_bytes
     - field: 24
       destination: out_packets
+# IPFIX uses the same IANA Information Element IDs for these counters as NetFlow v9.
+# OpenBSD pflow(4) pflowproto 10 is unidirectional and only sets fields 1 and 2;
+# bidirectional exporters additionally set 23 and 24.
+ipfix:
+  mapping:
+    - field: 1   # octetDeltaCount
+      destination: in_bytes
+    - field: 2   # packetDeltaCount
+      destination: in_packets
+    - field: 23  # postOctetDeltaCount
+      destination: out_bytes
+    - field: 24  # postPacketDeltaCount
+      destination: out_packets
